@@ -1,0 +1,253 @@
+{
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-480, 656],
+      "id": "b340a0c6-f0e1-4ac9-ac31-7f6d0a0111f7",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = [];\n\nconst dataArray = $input.first().json.data || [];\n\nfor (const item of dataArray) {\n  if (item.model == \"card\") {\n    output.push({\n      json: {\n        card_id: item.id,\n        name: item.name\n      }\n    });\n  }\n}\n\nreturn output;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [80, 656],
+      "id": "4830be96-437c-43bc-ba22-aa168950b945",
+      "name": "Extract Card IDs"
+    },
+    {
+      "parameters": {
+        "url": "=https://metabase.shopback.com/api/collection/{{ $json.collection_id }}/items ",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "string",
+        "body": "format_rows=false&pivot_results=false",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-112, 656],
+      "id": "70fb15bb-d7ce-4409-8cab-d272b2b5654b",
+      "name": "Get Card IDs",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "DZXSgsFwhVhdhosS",
+          "name": "Metabase Header Auth Sep 11"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = items.map(item => item.json);\n\n// Grouping: metric_name -> submetric_key -> submetric object\nconst metricMap = new Map();\n\nfor (const obj of inputData) {\n  const {\n    metric_name,\n    category,\n    timezone,\n    xaxis,\n    trend,\n    week,\n  } = obj;\n\n  // Dynamically get the metric value from the last field\n  const keys = Object.keys(obj);\n  const metricValueKey = keys[keys.length - 1];\n  const value = obj[metricValueKey];\n\n  // Init metric group if not exists\n  if (!metricMap.has(metric_name)) {\n    metricMap.set(metric_name, new Map());\n  }\n\n  const submetricMap = metricMap.get(metric_name);\n\n  // Create a unique key for submetric variation\n  const label = `[${category}] - ${metric_name}`;\n  const submetricKey = `${label}|${category}|${timezone}|${xaxis}|${trend}`;\n\n  // Init submetric if not exists\n  if (!submetricMap.has(submetricKey)) {\n    submetricMap.set(submetricKey, {\n      label,\n      category,\n      timezone,\n      xaxis,\n      trend,\n      data_points: []\n    });\n  }\n\n  // Add datapoint\n  submetricMap.get(submetricKey).data_points.push({\n    timestamp: week,\n    value: value\n  });\n}\n\n// Flatten into desired structure\nconst result = [];\n\nfor (const [metric_name, submetricMap] of metricMap.entries()) {\n  const submetrics = Array.from(submetricMap.values());\n  result.push({\n    json: {\n      metric_name,\n      submetrics\n    }\n  });\n}\n\nreturn result;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [544, 656],
+      "id": "735cc466-7aa4-4320-b604-0ee2aa850005",
+      "name": "Format JSON"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://metabase.shopback.com/api/card/{{ $json.card_id }}/query/json ",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "string",
+        "body": "format_rows=false&pivot_results=false",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 6,
+              "batchInterval": 30000
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [272, 656],
+      "id": "0b3ffc91-0fab-4e8b-ae18-27537a880b33",
+      "name": "Download clustered cards",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "alwaysOutputData": false,
+      "maxTries": 5,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "DZXSgsFwhVhdhosS",
+          "name": "Metabase Header Auth Sep 11"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://example.com/api/ingest/metrics",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{\nJSON.stringify({\n  workspace_id: \"2eebef92-0895-4b6e-ab4e-f9249b963c07\",\n  slide_title: `T4 WBR ${(() => {\n    const today = new Date();\n    const day = today.getDay(); // 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat\n    const diffToMonday = (day + 6) % 7; // days since Monday\n    const monday = new Date(today);\n    monday.setDate(today.getDate() - diffToMonday); // this week’s Monday\n\n    const wed = new Date(monday);\n    wed.setDate(monday.getDate() + 2); // this week's Wednesday (Mon + 2)\n\n    if (today.getDay() > 3) {\n      // If today is Wed (3) or later, move to next week's Wednesday\n      wed.setDate(wed.getDate() + 7);\n    }\n\n    return wed.toISOString().split('T')[0];\n  })()}`,\n  slide_date: (() => {\n    const today = new Date();\n    const day = today.getDay();\n    const diffToMonday = (day + 6) % 7;\n    const monday = new Date(today);\n    monday.setDate(today.getDate() - diffToMonday);\n\n    const wed = new Date(monday);\n    wed.setDate(monday.getDate() + 2);\n\n    if (today.getDay() > 3) {\n      wed.setDate(wed.getDate() + 7);\n    }\n\n    return wed.toISOString().split('T')[0];\n  })(),\n  metrics: $json[\"data\"]\n})\n}}\n\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [912, 656],
+      "id": "12cf1920-655d-43f4-b64b-7f6dcef6e571",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "oldsL2iS7xDBktD9",
+          "name": "Header Auth account 16"
+        },
+        "httpBearerAuth": {
+          "id": "iYmnyP94YvUYHUov",
+          "name": "Bearer Auth account 5"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [720, 656],
+      "id": "d97ffbd6-4704-4fc4-ac84-f775b1006017",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"collection_id\": 6251\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-304, 656],
+      "id": "6a9f7290-9dd0-4d1f-8c66-8cc309597af6",
+      "name": "Get Collection ID"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get Collection ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Card IDs": {
+      "main": [
+        [
+          {
+            "node": "Download clustered cards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Card IDs": {
+      "main": [
+        [
+          {
+            "node": "Extract Card IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format JSON": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download clustered cards": {
+      "main": [
+        [
+          {
+            "node": "Format JSON",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Collection ID": {
+      "main": [
+        [
+          {
+            "node": "Get Card IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "fc2ec19b725686acfdf7b96ed9448446dd300f3893e4aa5c2c6394f4f94e7c89"
+  }
+}
