@@ -2,7 +2,7 @@
 
 Inspired by [xmrit.com](https://xmrit.com) by Commoncog, this is a self-hosted dashboard platform for Statistical Process Control (SPC) using XMR (X-bar and Moving Range) charts. Deploy your own instance to monitor metrics, detect process variations, and make data-driven decisions across your organization.
 
-> **New to XMR Charts?** See the [Xmrit User Manual](https://xmrit.com/manual/) by Commoncog for concepts, detection rules, trend analysis, and best practices.
+> **New to XMR Charts?** See the [XMRit User Manual](https://xmrit.com/manual/) by Commoncog for concepts, detection rules, trend analysis, and best practices.
 
 ## ✨ Features
 
@@ -21,6 +21,20 @@ Inspired by [xmrit.com](https://xmrit.com) by Commoncog, this is a self-hosted d
 - NextAuth.js with Google OAuth
 - Metrics ingestion API for automation
 - Interactive charts (Recharts + Radix UI)
+
+## 📚 Documentation
+
+Comprehensive feature documentation is available in the [`docs/`](./docs) folder:
+
+- **[Documentation Index](./docs/README.md)** - Complete guide to all features
+- **[Controller Logic (Traffic Light)](./docs/CONTROLLER_TRAFFIC_LIGHT.md)** - Process control status indicators
+- **[Data Ingestion API](./docs/DATA_INGESTION.md)** - REST API for programmatic data ingestion
+- **[Auto Lock Limit](./docs/AUTO_LOCK_LIMIT.md)** - Automatic outlier detection and removal
+- **[Lock Limit](./docs/LOCK_LIMIT.md)** - Manual limit locking and customization
+- **[Trend Lines](./docs/TREND_LINES.md)** - Linear trend analysis with dynamic limits
+- **[Seasonality](./docs/DESEASONALISATION.md)** - Seasonal pattern removal and adjustments
+
+Each document includes detailed explanations, use cases, implementation details, best practices, and troubleshooting guides.
 
 ## 🚀 Quick Start
 
@@ -59,13 +73,10 @@ Get Google OAuth credentials:
 **3. Database & Run**
 
 ```bash
-npm run db:generate     # Generate migrations
-npm run db:migrate      # Apply migrations
-npm run workspace:init  # Create default workspace (required for n8n workflow)
-npm run dev             # Start server → http://localhost:3000
+npm run db:generate  # Generate migrations
+npm run db:migrate   # Apply migrations
+npm run dev          # Start server → http://localhost:3000
 ```
-
-> **Note:** The `workspace:init` command creates a default workspace and automatically updates `n8n.json` with the correct workspace ID. This is required before using the n8n workflow for data ingestion.
 
 ## 📁 Project Structure
 
@@ -91,19 +102,18 @@ src/
 
 ## 🛠️ Available Scripts
 
-| Command                  | Description                             |
-| ------------------------ | --------------------------------------- |
-| `npm run dev`            | Start development server with Turbopack |
-| `npm run build`          | Build for production                    |
-| `npm run start`          | Start production server                 |
-| `npm run lint`           | Run Biome linter                        |
-| `npm run format`         | Format code with Biome                  |
-| `npm run db:generate`    | Generate database migrations            |
-| `npm run db:migrate`     | Apply migrations to database            |
-| `npm run db:push`        | Push schema changes to database         |
-| `npm run db:studio`      | Open Drizzle Studio (database GUI)      |
-| `npm run db:reset`       | Reset database (⚠️ destructive)         |
-| `npm run workspace:init` | Create default workspace & update n8n   |
+| Command               | Description                             |
+| --------------------- | --------------------------------------- |
+| `npm run dev`         | Start development server with Turbopack |
+| `npm run build`       | Build for production                    |
+| `npm run start`       | Start production server                 |
+| `npm run lint`        | Run Biome linter                        |
+| `npm run format`      | Format code with Biome                  |
+| `npm run db:generate` | Generate database migrations            |
+| `npm run db:migrate`  | Apply migrations to database            |
+| `npm run db:push`     | Push schema changes to database         |
+| `npm run db:studio`   | Open Drizzle Studio (database GUI)      |
+| `npm run db:reset`    | Reset database (⚠️ destructive)         |
 
 ## 🔧 Data Ingestion API
 
@@ -148,21 +158,14 @@ Content-Type: application/json
 
 ### n8n + Metabase Integration - Ingestion Example
 
-Included `n8n.json` workflow: Extract from Metabase → Transform → Ingest into Xmrit
+Included `n8n.json` workflow: Extract from Metabase → Transform → Ingest into XMRit
 
 **Setup:**
 
-1. **Create Default Workspace** (required before importing workflow):
-
-```bash
-npm run workspace:init
-```
-
-This creates a workspace and automatically updates `n8n.json` with the correct workspace ID.
-
-2. Import `n8n.json` to your n8n instance
-3. Configure Metabase auth & collection ID
-4. Set Bearer token to your `METRICS_API_KEY`
+1. Import `n8n.json` to your n8n instance
+2. Configure Metabase auth & collection ID
+3. Set Bearer token to your `METRICS_API_KEY`
+4. Set workspace ID
 5. Run manually or scheduled
 
 **Features:** Auto date calculation, batch processing, retry logic, dynamic metric extraction, multi-dimension support. Adaptable to other data sources.
