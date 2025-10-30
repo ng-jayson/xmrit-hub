@@ -91,7 +91,7 @@ Reduced UNPL = Trend + (max(0, avgMR - |m|) × 2.66)
 Reduced LNPL = Trend - (max(0, avgMR - |m|) × 2.66)
 ```
 
-**Use case**: 
+**Use case**:
 - Standard limits: Default, includes all variation
 - Reduced limits: When you want to see variation that's independent of the trend itself
 
@@ -346,7 +346,7 @@ export function calculateLinearRegression(data: DataPoint[]): { m: number; c: nu
   for (let i = 0; i < n; i++) {
     const x = i; // Use index as X
     const y = data[i].value;
-    
+
     sumX += x;
     sumY += y;
     sumXY += x * y;
@@ -384,19 +384,19 @@ export function createTrendLines(stats: RegressionStats, data: DataPoint[]): Tre
 
   data.forEach((d, i) => {
     const centreValue = i * m + c;
-    
+
     // Standard limits
     const unplValue = centreValue + avgMR * 2.66;
     const lnplValue = centreValue - avgMR * 2.66;
-    
+
     // Reduced limits (account for trend slope)
     const reducedUnplValue = centreValue + Math.max(0, avgMR - Math.abs(m)) * 2.66;
     const reducedLnplValue = centreValue - Math.max(0, avgMR - Math.abs(m)) * 2.66;
-    
+
     // Quartiles
     const upperQuartileValue = (unplValue + centreValue) / 2;
     const lowerQuartileValue = (lnplValue + centreValue) / 2;
-    
+
     trendLines.centreLine.push({ timestamp: d.timestamp, value: centreValue });
     trendLines.unpl.push({ timestamp: d.timestamp, value: unplValue });
     trendLines.lnpl.push({ timestamp: d.timestamp, value: lnplValue });
@@ -421,13 +421,13 @@ const trendLines = useMemo<TrendLimits | null>(() => {
   if (!trendActive || processedDataPoints.length < 2) {
     return null;
   }
-  
+
   const stats: RegressionStats = {
     m: trendGradient,
     c: trendIntercept,
     avgMR: baseXmrData.limits.avgMovement,
   };
-  
+
   return createTrendLines(stats, processedDataPoints);
 }, [trendActive, trendGradient, trendIntercept, processedDataPoints, baseXmrData.limits.avgMovement]);
 ```
@@ -532,9 +532,10 @@ This shouldn't happen - they're mutually exclusive. If you see this, it's a UI b
 
 ## Related Documentation
 
-- [Lock Limit](./lock-limit.md) - Incompatible with trend, but useful after trend stabilizes
-- [Auto Lock Limit](./auto-lock-limit.md) - Can be used to clean data before applying trend
-- [Controller Logic](./controller-logic-traffic-light.md) - How traffic light evaluates processes with trends
+- [Lock Limit](./LOCK_LIMIT.md) - Incompatible with trend, but useful after trend stabilizes
+- [Auto Lock Limit](./AUTO_LOCK_LIMIT.md) - Can be used to clean data before applying trend
+- [Controller Logic](./CONTROLLER_TRAFFIC_LIGHT.md) - How traffic light evaluates processes with trends
+- [Seasonality](./DESEASONALISATION.md) - Can be combined with trends for data with both patterns
 
 ## References
 

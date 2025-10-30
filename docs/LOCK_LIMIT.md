@@ -16,14 +16,14 @@ Lock Limit serves several critical purposes:
 
 ## Key Difference: Lock Limit vs Auto Lock Limit
 
-| Feature | Lock Limit | Auto Lock Limit |
-|---------|-----------|-----------------|
-| **Activation** | Manual - user clicks "Lock Limits" | Automatic - triggers on page load |
-| **Outlier Detection** | User manually selects points to exclude | Algorithmic detection using 4 statistical methods |
-| **Limit Values** | User can edit any limit value | Automatically calculated from non-outlier data |
-| **Use Case** | Domain knowledge, custom targets, specific exclusions | Clear statistical outliers, objective criteria |
-| **Flexibility** | Full customization | Fixed algorithm |
-| **When to Use** | Process improvement goals, known special causes | Unknown or multiple outliers, objective baseline |
+| Feature               | Lock Limit                                            | Auto Lock Limit                                   |
+| --------------------- | ----------------------------------------------------- | ------------------------------------------------- |
+| **Activation**        | Manual - user clicks "Lock Limits"                    | Automatic - triggers on page load                 |
+| **Outlier Detection** | User manually selects points to exclude               | Algorithmic detection using 4 statistical methods |
+| **Limit Values**      | User can edit any limit value                         | Automatically calculated from non-outlier data    |
+| **Use Case**          | Domain knowledge, custom targets, specific exclusions | Clear statistical outliers, objective criteria    |
+| **Flexibility**       | Full customization                                    | Fixed algorithm                                   |
+| **When to Use**       | Process improvement goals, known special causes       | Unknown or multiple outliers, objective baseline  |
 
 ## How to Lock Limits
 
@@ -40,22 +40,24 @@ Click the lock icon (🔒) on any submetric card. This opens the Lock Limits dia
 
 The data point table displays:
 
-| Column | Description |
-|--------|-------------|
-| **Date** | Timestamp of the data point |
-| **Value** | Actual value |
+| Column       | Description                             |
+| ------------ | --------------------------------------- |
+| **Date**     | Timestamp of the data point             |
+| **Value**    | Actual value                            |
 | **Movement** | Absolute difference from previous point |
-| **Status** | Included/Excluded/Violation flags |
-| **Actions** | Exclude/Restore buttons |
+| **Status**   | Included/Excluded/Violation flags       |
+| **Actions**  | Exclude/Restore buttons                 |
 
 ### Step 3: Exclude Data Points (Optional)
 
 To exclude a data point:
+
 1. Click the **trash icon** (🗑️) next to the point
 2. Point turns translucent in the table
 3. Limits automatically recalculate without that point
 
 To restore an excluded point:
+
 1. Click the **undo icon** (↶) next to the point
 2. Point is re-included
 3. Limits recalculate with that point included
@@ -66,7 +68,7 @@ After excluding/including points, the dialog shows recalculated limits:
 
 - **Average X**: Mean of included data points
 - **UNPL**: Upper Natural Process Limit
-- **LNPL**: Lower Natural Process Limit  
+- **LNPL**: Lower Natural Process Limit
 - **Average Movement**: Average moving range of included points
 - **URL**: Upper Range Limit
 
@@ -87,6 +89,7 @@ URL:          [___]
 ### Step 6: Lock the Limits
 
 Click the "**Lock Limits**" button to finalize. The system:
+
 1. Validates all limit values
 2. Stores the locked limits
 3. Marks which limits were manually modified (if any)
@@ -136,15 +139,16 @@ The system uses **bitwise flags** to track which specific limits were modified:
 
 ```typescript
 export enum LockedLimitStatus {
-  UNLOCKED = 0,        // 0000 - No limits locked
-  LOCKED = 1,          // 0001 - Limits locked (no modifications)
-  UNPL_MODIFIED = 2,   // 0010 - Upper limit modified
-  LNPL_MODIFIED = 4,   // 0100 - Lower limit modified
-  AVGX_MODIFIED = 8,   // 1000 - Average modified
+  UNLOCKED = 0, // 0000 - No limits locked
+  LOCKED = 1, // 0001 - Limits locked (no modifications)
+  UNPL_MODIFIED = 2, // 0010 - Upper limit modified
+  LNPL_MODIFIED = 4, // 0100 - Lower limit modified
+  AVGX_MODIFIED = 8, // 1000 - Average modified
 }
 ```
 
 This allows precise tracking:
+
 - "UNPL modified" → Only upper limit edited
 - "UNPL & LNPL modified" → Both limits edited, but average unchanged
 - "All modified" → User fully customized the limits
@@ -153,14 +157,14 @@ This allows precise tracking:
 
 Quartile lines (intermediate lines between average and limits) adjust based on modifications:
 
-| Modification | Upper Quartile | Lower Quartile |
-|--------------|---------------|---------------|
-| None (locked only) | ✅ Show | ✅ Show |
-| UNPL modified | ❌ Hide | ✅ Show |
-| LNPL modified | ✅ Show | ❌ Hide |
-| Both modified (symmetric) | ✅ Show | ✅ Show |
-| Both modified (asymmetric) | ❌ Hide | ❌ Hide |
-| Average modified | Check symmetry | Check symmetry |
+| Modification               | Upper Quartile | Lower Quartile |
+| -------------------------- | -------------- | -------------- |
+| None (locked only)         | ✅ Show        | ✅ Show        |
+| UNPL modified              | ❌ Hide        | ✅ Show        |
+| LNPL modified              | ✅ Show        | ❌ Hide        |
+| Both modified (symmetric)  | ✅ Show        | ✅ Show        |
+| Both modified (asymmetric) | ❌ Hide        | ❌ Hide        |
+| Average modified           | Check symmetry | Check symmetry |
 
 **Rationale**: Quartiles are mathematically meaningful when limits are symmetric around the average. Asymmetric modifications suggest the user has specific targets, so calculated quartiles may not be meaningful.
 
@@ -214,16 +218,19 @@ This ensures quartiles remain mathematically consistent with your locked limits.
 ### On the Chart
 
 **Locked Limits**:
+
 - Displayed as solid, non-dashed lines (indicating they won't change)
 - Limit values shown at the right edge
 - Lock icon in legend
 
 **Excluded Points**:
+
 - Rendered as translucent/grayed-out dots
 - Still visible but clearly distinguished from included points
 - Tooltip shows "Excluded from limits"
 
 **Included Points**:
+
 - Normal color (submetric color or default blue)
 - Violations highlighted in red/orange (based on locked limits)
 - Tooltip shows value and violation details
@@ -239,6 +246,7 @@ This ensures quartiles remain mathematically consistent with your locked limits.
 ```
 
 **Lock Icon Button**:
+
 - Closed lock icon when locked
 - Open lock icon when unlocked
 - Click to open Lock Limits dialog
@@ -246,11 +254,13 @@ This ensures quartiles remain mathematically consistent with your locked limits.
 ### In the Lock Dialog
 
 **Excluded Row Styling**:
+
 - Gray background
 - Strikethrough text
 - "Excluded" label in status column
 
 **Modified Limit Fields**:
+
 - Editable input fields
 - Values update preview in real-time as you type
 - Red border if validation fails
@@ -262,6 +272,7 @@ This ensures quartiles remain mathematically consistent with your locked limits.
 **Scenario**: Your current process has UNPL = 100, but you want to improve to UNPL = 90.
 
 **Steps**:
+
 1. Lock current limits as baseline
 2. Document current performance
 3. Implement improvements
@@ -273,6 +284,7 @@ This ensures quartiles remain mathematically consistent with your locked limits.
 **Scenario**: A data center outage on Jan 15 caused response times to spike.
 
 **Steps**:
+
 1. Open Lock Limits dialog
 2. Find and exclude the Jan 15 data point
 3. Lock limits based on normal operating conditions
@@ -283,6 +295,7 @@ This ensures quartiles remain mathematically consistent with your locked limits.
 **Scenario**: You want to compare Q3 2024 performance against Q4 2024 using the same baseline.
 
 **Steps**:
+
 1. Calculate and lock limits based on Q3 data
 2. New Q4 data arrives and is plotted against Q3 locked limits
 3. Any Q4 violations indicate performance different from Q3
@@ -293,6 +306,7 @@ This ensures quartiles remain mathematically consistent with your locked limits.
 **Scenario**: Your process must stay within regulatory limits of 50-150, which differ from calculated limits.
 
 **Steps**:
+
 1. Open Lock Limits dialog
 2. Manually set UNPL = 150, LNPL = 50
 3. Set Average X to your target (e.g., 100)
@@ -304,6 +318,7 @@ This ensures quartiles remain mathematically consistent with your locked limits.
 **Scenario**: New process had unstable first two weeks. You want limits based on steady-state performance.
 
 **Steps**:
+
 1. Open Lock Limits dialog
 2. Exclude all data points from first two weeks
 3. Lock limits based on remaining data
@@ -332,6 +347,7 @@ If limits were originally auto-locked:
 ### Method 3: Activate Trend or Seasonality
 
 Trend analysis and seasonality adjustments are incompatible with locked limits. Activating either will:
+
 1. Automatically unlock the limits
 2. Show warning notification
 3. Apply trend/seasonality calculations instead
@@ -341,10 +357,12 @@ Trend analysis and seasonality adjustments are incompatible with locked limits. 
 ### Bulk Data Point Management
 
 **Exclude Multiple Points**:
+
 - No built-in bulk select (yet)
 - Workaround: Exclude points one-by-one
 
 **Restore All Excluded Points**:
+
 - Click restore icon on each excluded point
 - Or unlock limits and re-lock with new selections
 
@@ -384,7 +402,8 @@ const [lockedLimits, setLockedLimits] = useState<XMRLimits | null>(null);
 
 // Auto-lock state
 const [autoLocked, setAutoLocked] = useState(false);
-const [autoSuggestedLimits, setAutoSuggestedLimits] = useState<XMRLimits | null>(null);
+const [autoSuggestedLimits, setAutoSuggestedLimits] =
+  useState<XMRLimits | null>(null);
 
 // Modification tracking
 const [isManuallyModified, setIsManuallyModified] = useState(false);
@@ -424,13 +443,13 @@ When a point is excluded, limits are recalculated immediately:
 const handleExcludePoint = (index: number) => {
   const newExcluded = [...excludedIndices, index];
   setExcludedIndices(newExcluded);
-  
+
   // Filter out excluded points
   const includedPoints = dataPoints.filter((_, i) => !newExcluded.includes(i));
-  
+
   // Recalculate limits
   const newLimits = calculateXMRLimits(includedPoints);
-  
+
   // Update preview
   setPreviewLimits(newLimits);
 };
@@ -441,6 +460,7 @@ const handleExcludePoint = (index: number) => {
 ### 1. Document Your Decisions
 
 When locking limits, document:
+
 - Why you locked them
 - Which points you excluded and why
 - Any manual modifications made
@@ -451,6 +471,7 @@ When locking limits, document:
 ### 2. Review Periodically
 
 Locked limits don't update with new data. Periodically:
+
 - Review if locked limits still make sense
 - Check if process has fundamentally changed
 - Consider unlocking and recalculating with recent data
@@ -458,6 +479,7 @@ Locked limits don't update with new data. Periodically:
 ### 3. Use Auto-Lock First
 
 Before manually locking:
+
 - See if auto-lock detects the outliers you're concerned about
 - Auto-lock is objective and consistent
 - Only use manual lock if auto-lock doesn't meet your needs
@@ -465,6 +487,7 @@ Before manually locking:
 ### 4. Validate Limit Logic
 
 When manually editing limit values:
+
 - Ensure limits are realistic for your process
 - Don't set aspirational targets too far from current performance
 - Limits should represent achievable variation, not wishes
@@ -472,6 +495,7 @@ When manually editing limit values:
 ### 5. Be Conservative with Exclusions
 
 Avoid excluding too many points:
+
 - Guideline: Exclude < 10% of data as a rule of thumb
 - Every exclusion should have a documented special cause
 - If you're excluding >25%, consider if there's a deeper process issue
@@ -479,6 +503,7 @@ Avoid excluding too many points:
 ### 6. Communicate Lock Status
 
 If sharing charts with others:
+
 - Clearly indicate when limits are locked
 - Explain what locked limits represent
 - Note if they're targets vs calculated baselines
@@ -488,6 +513,7 @@ If sharing charts with others:
 ### "I can't lock limits - button is disabled"
 
 Possible reasons:
+
 - Insufficient data (need at least 10 points)
 - Trend or seasonality is active (incompatible)
 - Validation errors in manually edited values
@@ -495,6 +521,7 @@ Possible reasons:
 ### "Locked limits don't match my manual edits"
 
 Check validation errors:
+
 - Average must be between UNPL and LNPL
 - UNPL must be > LNPL
 - Avg Movement must be ≤ URL
@@ -510,19 +537,20 @@ Data point table is scrollable. Use the scroll area to find earlier data points.
 ### "Locked limits are too wide/narrow"
 
 If calculated locked limits don't match expectations:
+
 - Review which points are excluded
 - Check data quality (are there hidden outliers?)
 - Consider manually editing limit values to your desired targets
 
 ## Related Documentation
 
-- [Auto Lock Limit](./auto-lock-limit.md) - Automatic outlier detection and locking
-- [Controller Logic](./controller-logic-traffic-light.md) - How locked limits affect process status
-- [Trend Lines](./trend-lines.md) - Alternative to locking when data has trends
+- [Auto Lock Limit](./AUTO_LOCK_LIMIT.md) - Automatic outlier detection and locking
+- [Controller Logic](./CONTROLLER_TRAFFIC_LIGHT.md) - How locked limits affect process status
+- [Trend Lines](./TREND_LINES.md) - Alternative to locking when data has trends
+- [Seasonality](./DESEASONALISATION.md) - Seasonal adjustments (incompatible with lock limits)
 
 ## References
 
 - Statistical Process Control: Wheeler, "Making Sense of Data"
 - XMRit User Manual: https://xmrit.com/manual/
 - Control Chart Interpretation: Montgomery, "Introduction to Statistical Quality Control"
-

@@ -435,6 +435,14 @@ Example log output:
 [AUDIT] Successfully ingested metrics from 192.168.1.100: workspace=550e8400-..., slide=660e8400-..., metrics=2, submetrics=3, datapoints=12, duration=245ms
 ```
 
+## Related Documentation
+
+- [Controller Logic](./CONTROLLER_TRAFFIC_LIGHT.md) - Understanding process control status indicators
+- [Auto Lock Limit](./AUTO_LOCK_LIMIT.md) - Automatic outlier detection
+- [Lock Limit](./LOCK_LIMIT.md) - Manual limit locking
+- [Trend Lines](./TREND_LINES.md) - Trend analysis for time series data
+- [Seasonality](./DESEASONALISATION.md) - Seasonal adjustments for recurring patterns
+
 ## Future Enhancements
 
 Potential improvements under consideration:

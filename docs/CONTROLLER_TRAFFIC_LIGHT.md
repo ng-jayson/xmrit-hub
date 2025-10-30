@@ -313,9 +313,11 @@ Potential improvements under consideration:
 
 ## Related Documentation
 
-- [Auto Lock Limit](./auto-lock-limit.md) - Automatic outlier detection and limit adjustment
-- [Lock Limit](./lock-limit.md) - Manual limit locking and modification
-- [Trend Lines](./trend-lines.md) - Trend analysis and dynamic limits
+- [Auto Lock Limit](./AUTO_LOCK_LIMIT.md) - Automatic outlier detection and limit adjustment
+- [Lock Limit](./LOCK_LIMIT.md) - Manual limit locking and modification
+- [Trend Lines](./TREND_LINES.md) - Trend analysis and dynamic limits
+- [Seasonality](./DESEASONALISATION.md) - Seasonal adjustments for recurring patterns
+- [Data Ingestion](./DATA_INGESTION.md) - API for programmatic data ingestion
 
 ## References
 

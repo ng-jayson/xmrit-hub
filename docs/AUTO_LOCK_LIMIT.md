@@ -432,9 +432,10 @@ The recent point has extra protection (Z-Score > 3.0 required). If it's still ex
 
 ## Related Documentation
 
-- [Lock Limit](./lock-limit.md) - Manual limit locking and customization
-- [Controller Logic](./controller-logic-traffic-light.md) - How locked limits affect process control status
-- [Trend Lines](./trend-lines.md) - Alternative approach for data with trends
+- [Lock Limit](./LOCK_LIMIT.md) - Manual limit locking and customization
+- [Controller Logic](./CONTROLLER_TRAFFIC_LIGHT.md) - How locked limits affect process control status
+- [Trend Lines](./TREND_LINES.md) - Alternative approach for data with trends
+- [Seasonality](./DESEASONALISATION.md) - Remove seasonal patterns before applying auto-lock
 
 ## References
 

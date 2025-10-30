@@ -155,8 +155,11 @@ export function SubmetricSeasonalityDialog({
       }
       // Recalculate factors if we don't have initial factors or if edited data changed
       if (initialFactors.length === 0) {
+        const dataToUse =
+          editedDataPoints.length > 0 ? editedDataPoints : dataPoints;
         const { factors } = calculateSeasonalFactors(
-          editedDataPoints.length > 0 ? editedDataPoints : dataPoints,
+          dataPoints, // xData - for initial date reference
+          dataToUse, // seasonalData - data to calculate factors from
           period,
           grouping
         );
@@ -211,29 +214,36 @@ export function SubmetricSeasonalityDialog({
   // Check if seasonal factors calculation has warnings (uneven period lengths)
   const hasSeasonalFactorWarning = useMemo(() => {
     const { hasWarning } = calculateSeasonalFactors(
-      editedDataPoints,
+      dataPoints, // xData - for initial date reference
+      editedDataPoints, // seasonalData - data to calculate factors from
       period,
       grouping
     );
     return hasWarning && grouping !== "none";
-  }, [editedDataPoints, period, grouping]);
+  }, [dataPoints, editedDataPoints, period, grouping]);
 
   // Reset to original data and recalculate factors
   const handleResetToOriginal = useCallback(() => {
     setEditedDataPoints(dataPoints);
-    const { factors } = calculateSeasonalFactors(dataPoints, period, grouping);
+    const { factors } = calculateSeasonalFactors(
+      dataPoints, // xData - for initial date reference
+      dataPoints, // seasonalData - using original data
+      period,
+      grouping
+    );
     setSeasonalFactors(factors);
   }, [dataPoints, period, grouping]);
 
   // Recalculate seasonal factors from edited data
   const handleRecalculateFactors = useCallback(() => {
     const { factors } = calculateSeasonalFactors(
-      editedDataPoints,
+      dataPoints, // xData - for initial date reference
+      editedDataPoints, // seasonalData - data to calculate factors from
       period,
       grouping
     );
     setSeasonalFactors(factors);
-  }, [editedDataPoints, period, grouping]);
+  }, [dataPoints, editedDataPoints, period, grouping]);
 
   // Handle value change in seasonal data table
   const handleValueChange = useCallback(
@@ -276,7 +286,8 @@ export function SubmetricSeasonalityDialog({
     setPeriod(newPeriod);
     // Recalculate seasonal factors when period changes
     const { factors } = calculateSeasonalFactors(
-      editedDataPoints,
+      dataPoints, // xData - for initial date reference
+      editedDataPoints, // seasonalData - data to calculate factors from
       newPeriod,
       grouping
     );
@@ -288,7 +299,8 @@ export function SubmetricSeasonalityDialog({
     setGrouping(newGrouping);
     // Recalculate seasonal factors when grouping changes
     const { factors } = calculateSeasonalFactors(
-      editedDataPoints,
+      dataPoints, // xData - for initial date reference
+      editedDataPoints, // seasonalData - data to calculate factors from
       period,
       newGrouping
     );
@@ -299,7 +311,8 @@ export function SubmetricSeasonalityDialog({
   const handleApplySeasonality = () => {
     // Recalculate factors from current edited data before applying
     const { factors } = calculateSeasonalFactors(
-      editedDataPoints,
+      dataPoints, // xData - for initial date reference
+      editedDataPoints, // seasonalData - data to calculate factors from
       period,
       grouping
     );
@@ -352,17 +365,23 @@ export function SubmetricSeasonalityDialog({
 
           {/* Warning for less than one period */}
           {hasLessThanOnePeriod && (
-            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
-              <p className="text-sm text-red-800 dark:text-red-200">
-                Data spans less than one{" "}
+            <div className="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+              <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200 mb-1">
+                Insufficient Data Coverage
+              </p>
+              <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                Your data spans less than one complete{" "}
                 {period === "year"
                   ? "year"
                   : period === "quarter"
                   ? "quarter"
                   : period === "month"
                   ? "month"
-                  : "week"}
-                . De-seasonalising will flatten the data to a line.
+                  : "week"}{" "}
+                ({Math.round(periodCoverage * 100)}% of a period).
+                De-seasonalising will produce values very close to the average
+                with minimal variation, as there isn't enough data to identify
+                meaningful seasonal patterns.
               </p>
             </div>
           )}
@@ -370,8 +389,11 @@ export function SubmetricSeasonalityDialog({
           {/* Warning for exactly one period */}
           {hasExactlyOnePeriod && !hasLessThanOnePeriod && (
             <div className="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-              <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                Data spans exactly one{" "}
+              <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200 mb-1">
+                Limited Data Coverage
+              </p>
+              <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                Your data spans approximately one complete{" "}
                 {period === "year"
                   ? "year"
                   : period === "quarter"
@@ -379,7 +401,10 @@ export function SubmetricSeasonalityDialog({
                   : period === "month"
                   ? "month"
                   : "week"}
-                . The result will be flat after de-seasonalising.
+                . The deseasonalized result will be relatively flat because
+                there's only one season to compare against itself. For
+                meaningful seasonal patterns, data spanning multiple periods is
+                recommended.
               </p>
             </div>
           )}

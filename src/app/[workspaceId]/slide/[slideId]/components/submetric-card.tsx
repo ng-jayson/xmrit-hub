@@ -213,8 +213,15 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
       rawDataPoints.length >= MINIMUM_XMR_DATA_POINTS
     ) {
       const detectedPeriod = determinePeriodicity(rawDataPoints);
+
+      // Skip if detected period is "day" (not a valid seasonality period)
+      if (detectedPeriod === "day") {
+        return;
+      }
+
       const { factors } = calculateSeasonalFactors(
-        rawDataPoints,
+        rawDataPoints, // xData - for initial date reference
+        rawDataPoints, // seasonalData - data to calculate factors from
         detectedPeriod,
         "none" // No grouping for auto-apply
       );
@@ -284,8 +291,8 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
       processed = applySeasonalFactors(
         processed,
         seasonalFactors,
-        seasonalityPeriod,
-        seasonalityGrouping
+        seasonalityGrouping, // grouping comes before period
+        seasonalityPeriod
       );
     }
 

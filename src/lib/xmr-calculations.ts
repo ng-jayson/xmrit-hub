@@ -909,7 +909,8 @@ export interface TrendLimits {
 }
 
 /**
- * Calculate linear regression for trend analysis
+ * Calculate linear regression for trend analysis (matching main3.ts lines 700-752)
+ * Uses date-based normalization for better handling of irregular intervals
  */
 export function calculateLinearRegression(
   data: DataPoint[]
@@ -918,11 +919,19 @@ export function calculateLinearRegression(
     return null;
   }
 
-  // Normalize data - use indices as x values
-  const normalizedData: { x: number; y: number }[] = data.map((d, i) => ({
-    x: i,
-    y: d.value,
-  }));
+  // Normalize data using date-based normalization (matching main3.ts)
+  // This handles irregular time intervals better than simple index-based normalization
+  const firstDate = new Date(data[0].timestamp).getTime();
+  const secondDate = new Date(data[1].timestamp).getTime();
+  const base = secondDate - firstDate;
+
+  const normalizedData: { x: number; y: number }[] = data.map((d) => {
+    const dateValue = new Date(d.timestamp).getTime();
+    return {
+      x: base !== 0 ? (dateValue - firstDate) / base : 0,
+      y: d.value,
+    };
+  });
 
   const n = data.length;
 
@@ -1024,13 +1033,11 @@ export function createTrendLines(
     const unplValue = centreLineValue + avgMR * NPL_SCALING;
     const lnplValue = centreLineValue - avgMR * NPL_SCALING;
 
-    // Reduced limits (account for trend slope)
-    // By subtracting the absolute slope from avgMR, we get tighter limits
+    // Reduced limits (matching main3.ts lines 669-670)
+    // Subtracts the trend slope from avgMR to get tighter limits
     // that represent true process variation without the trend component
-    const reducedUnplValue =
-      centreLineValue + Math.max(0, avgMR - Math.abs(m)) * NPL_SCALING;
-    const reducedLnplValue =
-      centreLineValue - Math.max(0, avgMR - Math.abs(m)) * NPL_SCALING;
+    const reducedUnplValue = centreLineValue + (avgMR - m) * NPL_SCALING;
+    const reducedLnplValue = centreLineValue - (avgMR - m) * NPL_SCALING;
 
     // Quartiles for both standard and reduced
     const lowerQuartileValue = (lnplValue + centreLineValue) / 2;
@@ -1371,7 +1378,9 @@ export interface SeasonalFactors {
  * Determine data periodicity based on intervals
  * Returns the data granularity (how often data points occur)
  */
-export function determinePeriodicity(data: DataPoint[]): SeasonalityPeriod {
+export function determinePeriodicity(
+  data: DataPoint[]
+): SeasonalityPeriod | "day" {
   if (data.length < 2) return "year";
 
   // Calculate time deltas between consecutive points (in days)
@@ -1397,8 +1406,10 @@ export function determinePeriodicity(data: DataPoint[]): SeasonalityPeriod {
 
   const interval = Number(mostCommonDiff);
 
-  // Map intervals to data granularity
-  if (interval < 28) {
+  // Map intervals to data granularity (matching main3.ts lines 364-376)
+  if (interval < 7) {
+    return "day";
+  } else if (interval < 28) {
     return "week";
   } else if (interval < 90) {
     return "month";
@@ -1414,15 +1425,44 @@ export function determinePeriodicity(data: DataPoint[]): SeasonalityPeriod {
  * Mirrors main3.ts logic for minimum data granularity requirements
  *
  * Rules (from main3.ts lines 2108-2125):
- * - quarter interval: disable quarter, month, week (allow only year)
- * - month interval: disable month, week (allow quarter, year)
- * - week interval: disable week (allow month, quarter, year)
- * - else (day or finer): enable all
+ * - quarterly interval data: disable quarter, month, week (allow only year)
+ * - monthly interval data: disable month, week (allow quarter, year)
+ * - weekly interval data: disable week (allow month, quarter, year)
+ * - daily or finer: enable all
  */
 export function getPeriodDisableMap(
   data: DataPoint[]
 ): Record<SeasonalityPeriod, boolean> {
-  const interval = determinePeriodicity(data);
+  if (data.length < 2) {
+    return {
+      year: false,
+      quarter: false,
+      month: false,
+      week: false,
+    };
+  }
+
+  // Calculate time deltas between consecutive points (in days)
+  const deltas: number[] = [];
+  for (let i = 1; i < data.length; i++) {
+    const date1 = new Date(data[i - 1].timestamp);
+    const date2 = new Date(data[i].timestamp);
+    const diffTime = Math.abs(date2.getTime() - date1.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    deltas.push(diffDays);
+  }
+
+  // Count frequency of each delta
+  const diffCounts: { [key: number]: number } = {};
+  deltas.forEach((diff) => {
+    diffCounts[diff] = (diffCounts[diff] || 0) + 1;
+  });
+
+  // Find most common interval
+  const mostCommonDiff = Object.keys(diffCounts).reduce((a, b) =>
+    diffCounts[Number(a)] > diffCounts[Number(b)] ? a : b
+  );
+  const interval = Number(mostCommonDiff);
 
   // Default: all enabled
   const disableMap: Record<SeasonalityPeriod, boolean> = {
@@ -1432,21 +1472,21 @@ export function getPeriodDisableMap(
     week: false,
   };
 
-  // Apply disable rules based on detected interval
-  if (interval === "quarter") {
-    // Quarterly data: only year allowed
+  // Apply disable rules based on detected interval (matching main3.ts lines 2108-2125)
+  if (interval >= 80 && interval <= 100) {
+    // Quarterly interval data (80-100 days): only year allowed
     disableMap.quarter = true;
     disableMap.month = true;
     disableMap.week = true;
-  } else if (interval === "month") {
-    // Monthly data: quarter and year allowed
+  } else if (interval >= 28 && interval <= 35) {
+    // Monthly interval data (28-35 days): quarter and year allowed
     disableMap.month = true;
     disableMap.week = true;
-  } else if (interval === "week") {
-    // Weekly data: month, quarter, year allowed
+  } else if (interval >= 6 && interval <= 8) {
+    // Weekly interval data (6-8 days): month, quarter, year allowed
     disableMap.week = true;
   }
-  // else: all periods enabled (daily or finer data)
+  // else: daily or irregular (< 6 or > 100 days): enable all
 
   return disableMap;
 }
@@ -1488,17 +1528,17 @@ export function getPeriodCoverage(
 }
 
 /**
- * Periodize data based on period
- * This creates a 2D array where each sub-array represents one period (year/quarter/etc)
- * and contains all data points within that period in chronological order
+ * Periodize data based on period - simplified version
+ * Groups data by period key and maintains chronological order within each period
  */
 function periodiseData(
+  initialX: string,
   data: DataPoint[],
   period: SeasonalityPeriod = "year"
-): DataPoint[][] {
+): (DataPoint | null)[][] {
   if (data.length === 0) return [];
 
-  // Group data by period and sub-period within each period
+  // Group data by period key and sub-period index
   const groupedData: Map<string, Map<number, DataPoint>> = new Map();
 
   data.forEach((point) => {
@@ -1556,7 +1596,7 @@ function periodiseData(
   });
 
   // Convert to array format, maintaining chronological order
-  const periodisedData: DataPoint[][] = [];
+  const periodisedData: (DataPoint | null)[][] = [];
   const sortedPeriods = Array.from(groupedData.keys()).sort();
 
   sortedPeriods.forEach((periodKey) => {
@@ -1570,265 +1610,426 @@ function periodiseData(
 }
 
 /**
- * Helper function to get aggregation strategy based on grouping
- */
-function getAggregationStrategy(
-  grouping: SeasonalityGrouping
-): (values: number[]) => number {
-  return grouping === "none"
-    ? (values: number[]) =>
-        values.reduce((sum, v) => sum + v, 0) / values.length // Average
-    : (values: number[]) => values.reduce((sum, v) => sum + v, 0); // Sum
-}
-
-/**
- * Periodize data with grouping support
+ * Periodize data with grouping support (matching main3.ts lines 426-486)
  * Groups data within periods before calculating factors
+ * Uses accumulation and tracks period/subperiod boundaries
  */
 function periodiseDataGrouped(
+  initialX: string,
   data: DataPoint[],
   period: SeasonalityPeriod,
   grouping: SeasonalityGrouping
 ): DataPoint[][] {
   if (data.length === 0) return [];
-  if (grouping === "none") return periodiseData(data, period);
 
-  // Group data into sub-periods and aggregate
-  const periodGroups: { [key: string]: DataPoint[] } = {};
+  // Helper to get end of period
+  const getEndOf = (
+    date: Date,
+    unit: SeasonalityPeriod | SeasonalityGrouping
+  ): Date => {
+    const result = new Date(date);
+    if (unit === "year") {
+      result.setMonth(11, 31);
+      result.setHours(23, 59, 59, 999);
+    } else if (unit === "quarter") {
+      const quarter = Math.floor(result.getMonth() / 3);
+      result.setMonth(quarter * 3 + 3, 0);
+      result.setHours(23, 59, 59, 999);
+    } else if (unit === "month") {
+      result.setMonth(result.getMonth() + 1, 0);
+      result.setHours(23, 59, 59, 999);
+    } else if (unit === "week") {
+      const day = result.getDay();
+      result.setDate(result.getDate() + (6 - day));
+      result.setHours(23, 59, 59, 999);
+    }
+    return result;
+  };
 
-  data.forEach((point) => {
-    const date = new Date(point.timestamp);
-    let periodKey: string;
-    let groupKey: string;
+  // Helper to get start of period
+  const getStartOf = (
+    date: Date,
+    unit: SeasonalityPeriod | SeasonalityGrouping
+  ): Date => {
+    const result = new Date(date);
+    if (unit === "year") {
+      result.setMonth(0, 1);
+      result.setHours(0, 0, 0, 0);
+    } else if (unit === "quarter") {
+      const quarter = Math.floor(result.getMonth() / 3);
+      result.setMonth(quarter * 3, 1);
+      result.setHours(0, 0, 0, 0);
+    } else if (unit === "month") {
+      result.setDate(1);
+      result.setHours(0, 0, 0, 0);
+    } else if (unit === "week") {
+      const day = result.getDay();
+      result.setDate(result.getDate() - day);
+      result.setHours(0, 0, 0, 0);
+    }
+    return result;
+  };
 
-    // Determine period (e.g., year)
-    switch (period) {
-      case "year":
-        periodKey = date.getFullYear().toString();
-        break;
-      case "quarter":
-        periodKey = `${date.getFullYear()}-Q${
-          Math.floor(date.getMonth() / 3) + 1
-        }`;
-        break;
-      default:
-        periodKey = date.getFullYear().toString();
+  // Helper to add time units
+  const addTime = (
+    date: Date,
+    amount: number,
+    unit: SeasonalityPeriod | SeasonalityGrouping
+  ): Date => {
+    const result = new Date(date);
+    if (unit === "year") {
+      result.setFullYear(result.getFullYear() + amount);
+    } else if (unit === "quarter") {
+      result.setMonth(result.getMonth() + amount * 3);
+    } else if (unit === "month") {
+      result.setMonth(result.getMonth() + amount);
+    } else if (unit === "week") {
+      result.setDate(result.getDate() + amount * 7);
+    }
+    return result;
+  };
+
+  // Helper to format date as YYYY-MM-DD
+  const toDateStr = (d: Date): string => {
+    const offset = d.getTimezoneOffset();
+    const adjusted = new Date(d.getTime() - offset * 60 * 1000);
+    return adjusted.toISOString().slice(0, 10);
+  };
+
+  const initialDate = new Date(initialX);
+  let periodEnd = getEndOf(initialDate, period);
+  let subPeriodEnd = getEndOf(initialDate, grouping);
+
+  if (subPeriodEnd > periodEnd) {
+    throw new Error(
+      "Invalid parameters: sub-period duration must be less than period duration!"
+    );
+  }
+
+  let currSubPeriodValues: DataPoint[] = [];
+  const periodisedData: DataPoint[][] = [[]];
+
+  data.forEach((d) => {
+    const date = new Date(d.timestamp);
+
+    // Check if we've reached the end of a sub-period
+    if (date >= subPeriodEnd) {
+      // Accumulate values and create aggregated data point
+      const totalValue = currSubPeriodValues.reduce(
+        (acc, x) => acc + x.value,
+        0
+      );
+      periodisedData[0].unshift({
+        timestamp: toDateStr(getStartOf(subPeriodEnd, grouping)),
+        value: Math.round(totalValue * 100) / 100,
+      });
+
+      // Move to the next sub-period
+      subPeriodEnd = getEndOf(addTime(subPeriodEnd, 1, grouping), grouping);
+      currSubPeriodValues = [];
     }
 
-    // Determine grouping within period (e.g., month)
-    switch (grouping) {
-      case "month":
-        groupKey = `${periodKey}-${(date.getMonth() + 1)
-          .toString()
-          .padStart(2, "0")}`;
-        break;
-      case "week":
-        const onejan = new Date(date.getFullYear(), 0, 1);
-        const weekNum = Math.ceil(
-          ((date.getTime() - onejan.getTime()) / 86400000 +
-            onejan.getDay() +
-            1) /
-            7
-        );
-        groupKey = `${periodKey}-W${weekNum.toString().padStart(2, "0")}`;
-        break;
-      case "quarter":
-        groupKey = `${periodKey}-Q${Math.floor(date.getMonth() / 3) + 1}`;
-        break;
-      default:
-        groupKey = periodKey;
+    // Check if we've reached the end of a period
+    if (date >= periodEnd) {
+      // Move to the next period
+      periodEnd = getEndOf(addTime(periodEnd, 1, period), period);
+      periodisedData[0].reverse();
+      periodisedData.unshift([]);
     }
 
-    if (!periodGroups[groupKey]) {
-      periodGroups[groupKey] = [];
-    }
-    periodGroups[groupKey].push(point);
+    // Add current data value to the current sub-period
+    currSubPeriodValues.push(d);
   });
 
-  // Aggregate groups
-  const aggregatedGroups: { [key: string]: DataPoint } = {};
-  Object.entries(periodGroups).forEach(([key, points]) => {
-    const sum = points.reduce((acc, p) => acc + p.value, 0);
-    aggregatedGroups[key] = {
-      timestamp: points[0].timestamp,
-      value: Math.round(sum * 100) / 100,
-    };
-  });
+  // Handle remaining values in the last sub-period
+  if (currSubPeriodValues.length > 0) {
+    const totalValue = currSubPeriodValues.reduce((acc, x) => acc + x.value, 0);
+    periodisedData[0].unshift({
+      timestamp: toDateStr(getStartOf(subPeriodEnd, grouping)),
+      value: Math.round(totalValue * 100) / 100,
+    });
+  }
 
-  // Convert to periodised array format
-  const periodKeys = new Set(
-    Object.keys(aggregatedGroups).map((k) => k.split("-")[0])
-  );
-
-  const periodisedData: DataPoint[][] = [];
-  periodKeys.forEach((periodKey) => {
-    const periodData = Object.entries(aggregatedGroups)
-      .filter(([key]) => key.startsWith(periodKey))
-      .map(([_, point]) => point);
-
-    if (periodData.length > 0) {
-      periodisedData.push(periodData);
-    }
-  });
+  periodisedData[0].reverse();
+  periodisedData.reverse();
 
   return periodisedData;
 }
 
 /**
- * Calculate seasonal factors from data with optional grouping
+ * Calculate seasonal factors from data with optional grouping (matching main3.ts lines 488-545)
+ * @param xData - The base data for determining the initial date reference
+ * @param seasonalData - The data to calculate seasonal factors from
+ * @param period - The seasonality period (year, quarter, month, week)
+ * @param grouping - Optional grouping within periods (week, month, quarter, or none)
+ * @returns Object containing seasonal factors and whether there are missing periods
  */
 export function calculateSeasonalFactors(
-  data: DataPoint[],
+  xData: DataPoint[],
+  seasonalData: DataPoint[],
   period: SeasonalityPeriod = "year",
-  grouping: SeasonalityGrouping = "none"
+  grouping: SeasonalityGrouping | "none" = "none"
 ): { factors: number[]; hasWarning: boolean } {
-  if (data.length === 0) {
+  if (seasonalData.length === 0) {
     return { factors: [], hasWarning: false };
   }
 
-  // Use grouped or standard periodization
-  const periodisedData =
-    grouping !== "none"
-      ? periodiseDataGrouped(data, period, grouping)
-      : periodiseData(data, period);
+  const isGrouped = grouping !== "none";
+
+  // Use xData's first timestamp for reference, fallback to seasonalData if xData is empty
+  const initialX =
+    xData.length > 0 ? xData[0].timestamp : seasonalData[0].timestamp;
+
+  // Periodise data using the first data point's timestamp as reference
+  let periodisedData: (DataPoint | null)[][] | DataPoint[][];
+  if (isGrouped) {
+    periodisedData = periodiseDataGrouped(
+      initialX,
+      seasonalData,
+      period,
+      grouping as SeasonalityGrouping
+    );
+  } else {
+    periodisedData = periodiseData(initialX, seasonalData, period);
+  }
 
   if (periodisedData.length === 0) {
     return { factors: [], hasWarning: false };
   }
 
-  // Check if all periods have the same length
+  // Check if all periods have the same length (warns about incomplete periods)
   const hasWarning = !periodisedData.every(
     (p) => p.length === periodisedData[0].length
   );
 
+  // Check for missing sub-periods in grouped data
+  let hasMissingSubPeriods = false;
+  if (isGrouped) {
+    hasMissingSubPeriods = !periodisedData.every(
+      (p) => p.length === periodisedData[0].length
+    );
+  }
+
   // Calculate the number of sub-periods (seasons)
   const subPeriodCount = Math.max(...periodisedData.map((p) => p.length));
 
-  // Get aggregation strategy based on grouping
-  const aggregate = getAggregationStrategy(grouping);
+  // Get aggregation strategy: sum for grouped, average for non-grouped
+  const aggregationStrategy = isGrouped
+    ? (values: number[]) => values.reduce((sum, v) => sum + v, 0) // Sum
+    : (values: number[]) =>
+        values.reduce((sum, v) => sum + v, 0) / values.length; // Average
 
   // Calculate sub-period aggregates
   const subPeriodAggregates: number[] = [];
   for (let i = 0; i < subPeriodCount; i++) {
     const validValues = periodisedData
       .map((p) => p[i])
-      .filter((v) => v !== undefined && v !== null)
-      .map((d) => d.value);
+      .filter((v) => v != null) // Ignore nulls and missing subperiods
+      .map((d) => (d as DataPoint).value);
 
     if (validValues.length === 0) {
-      // No valid data for this sub-period - will result in NaN factor
+      // No valid data for this sub-period
       subPeriodAggregates.push(NaN);
     } else {
-      subPeriodAggregates.push(aggregate(validValues));
+      subPeriodAggregates.push(aggregationStrategy(validValues));
     }
   }
 
-  // Calculate overall average based on grouping mode (matches main3.ts lines 535-539)
-  const overallAvg =
-    grouping !== "none"
-      ? // Grouped: use subPeriodAggregates (including NaN for missing)
-        subPeriodAggregates
-          .filter((v) => !isNaN(v))
-          .reduce((sum, val) => sum + val, 0) /
-        subPeriodAggregates.filter((v) => !isNaN(v)).length
-      : // Non-grouped: use all original data values
-        data
-          .filter((d) => d.value != null)
-          .reduce((sum, d) => sum + d.value, 0) /
-        data.filter((d) => d.value != null).length;
+  // Calculate overall average based on grouping mode (matching main3.ts lines 535-539)
+  const overallAvg = isGrouped
+    ? // Grouped: use subPeriodAggregates only
+      subPeriodAggregates
+        .filter((v) => !isNaN(v))
+        .reduce((sum, val) => sum + val, 0) /
+      subPeriodAggregates.filter((v) => !isNaN(v)).length
+    : // Non-grouped: use all original seasonal data values
+      seasonalData
+        .filter((d) => d.value != null)
+        .reduce((sum, d) => sum + d.value, 0) /
+      seasonalData.filter((d) => d.value != null).length;
 
-  // Calculate seasonal factors (matches main3.ts line 541-543)
+  // Calculate seasonal factors (matching main3.ts lines 541-543)
   const seasonalFactors = subPeriodAggregates.map((v) =>
-    isNaN(v) || overallAvg === 0
-      ? 1.0 // Default to 1.0 for missing data (main3.ts uses isNaN check)
-      : roundToDecimalPrecision(v / overallAvg, 4)
+    isNaN(v) ? 1.0 : roundToDecimalPrecision(v / overallAvg, 4)
   );
 
-  return { factors: seasonalFactors, hasWarning };
+  return {
+    factors: seasonalFactors,
+    hasWarning: hasWarning || hasMissingSubPeriods,
+  };
 }
 
 /**
- * Apply seasonal factors to data (deseasonalize)
+ * Apply seasonal factors to grouped data (matching main3.ts lines 548-581)
+ * Aggregates data within sub-periods and applies seasonal factors
+ */
+function applySeasonalFactorsGrouped(
+  periodisedData: DataPoint[][],
+  seasonalFactors: number[],
+  grouping: SeasonalityGrouping
+): DataPoint[] {
+  if (periodisedData.length === 0) {
+    return [];
+  }
+
+  // Helper to get end of period
+  const getEndOf = (date: Date, unit: SeasonalityGrouping): Date => {
+    const result = new Date(date);
+    if (unit === "quarter") {
+      const quarter = Math.floor(result.getMonth() / 3);
+      result.setMonth(quarter * 3 + 3, 0);
+      result.setHours(23, 59, 59, 999);
+    } else if (unit === "month") {
+      result.setMonth(result.getMonth() + 1, 0);
+      result.setHours(23, 59, 59, 999);
+    } else if (unit === "week") {
+      const day = result.getDay();
+      result.setDate(result.getDate() + (6 - day));
+      result.setHours(23, 59, 59, 999);
+    }
+    return result;
+  };
+
+  // Helper to get start of period
+  const getStartOf = (date: Date, unit: SeasonalityGrouping): Date => {
+    const result = new Date(date);
+    if (unit === "quarter") {
+      const quarter = Math.floor(result.getMonth() / 3);
+      result.setMonth(quarter * 3, 1);
+      result.setHours(0, 0, 0, 0);
+    } else if (unit === "month") {
+      result.setDate(1);
+      result.setHours(0, 0, 0, 0);
+    } else if (unit === "week") {
+      const day = result.getDay();
+      result.setDate(result.getDate() - day);
+      result.setHours(0, 0, 0, 0);
+    }
+    return result;
+  };
+
+  // Helper to add time units
+  const addTime = (
+    date: Date,
+    amount: number,
+    unit: SeasonalityGrouping
+  ): Date => {
+    const result = new Date(date);
+    if (unit === "quarter") {
+      result.setMonth(result.getMonth() + amount * 3);
+    } else if (unit === "month") {
+      result.setMonth(result.getMonth() + amount);
+    } else if (unit === "week") {
+      result.setDate(result.getDate() + amount * 7);
+    }
+    return result;
+  };
+
+  // Helper to format date as YYYY-MM-DD
+  const toDateStr = (d: Date): string => {
+    const offset = d.getTimezoneOffset();
+    const adjusted = new Date(d.getTime() - offset * 60 * 1000);
+    return adjusted.toISOString().slice(0, 10);
+  };
+
+  let subPeriodEnd = getEndOf(
+    new Date(periodisedData[0][0].timestamp),
+    grouping
+  );
+  let newXData: DataPoint[] = [];
+  let currSubPeriodSum = 0;
+
+  periodisedData.forEach((period) => {
+    period.forEach((d, i) => {
+      const date = new Date(d.timestamp);
+
+      if (date >= subPeriodEnd) {
+        // Add new deseasonalized data value
+        if (i < seasonalFactors.length) {
+          const deseasonalizedValue =
+            seasonalFactors[i] !== 0
+              ? currSubPeriodSum / seasonalFactors[i]
+              : currSubPeriodSum;
+
+          newXData.push({
+            timestamp: toDateStr(getStartOf(subPeriodEnd, grouping)),
+            value: parseFloat(deseasonalizedValue.toFixed(1)),
+          });
+        }
+
+        currSubPeriodSum = 0;
+        // Move to the next sub-period
+        subPeriodEnd = getEndOf(addTime(subPeriodEnd, 1, grouping), grouping);
+      }
+
+      currSubPeriodSum += d.value;
+    });
+  });
+
+  return newXData;
+}
+
+/**
+ * Apply seasonal factors to data (deseasonalize) - matching main3.ts lines 583-629
  */
 export function applySeasonalFactors(
-  data: DataPoint[],
+  xData: DataPoint[],
   seasonalFactors: number[],
-  period: SeasonalityPeriod = "year",
-  grouping: SeasonalityGrouping = "none"
+  grouping: SeasonalityGrouping | "none",
+  period: SeasonalityPeriod = "year"
 ): DataPoint[] {
-  if (data.length === 0 || seasonalFactors.length === 0) {
-    return data;
+  if (xData.length === 0 || seasonalFactors.length === 0) {
+    return xData;
   }
 
-  const deseasonalizedData: DataPoint[] = [];
+  const periodisedData = periodiseData(xData[0].timestamp, xData, period);
 
-  // Build a map of date to seasonal factor
-  const dateSfMap: { [key: string]: number } = {};
-
-  if (grouping === "none") {
-    // Original behavior: use periodiseData for ungrouped data
-    const periodisedData = periodiseData(data, period);
-
-    periodisedData.forEach((periodData) => {
-      periodData.forEach((point, i) => {
-        if (i < seasonalFactors.length) {
-          dateSfMap[point.timestamp] = seasonalFactors[i];
-        }
-      });
-    });
-  } else {
-    // Grouped behavior: map each point to its group within the period
-    data.forEach((point) => {
-      const date = new Date(point.timestamp);
-      let factorIndex: number;
-
-      // Determine which factor to use based on grouping
-      switch (grouping) {
-        case "month":
-          // Map to month of year (0-11)
-          factorIndex = date.getMonth();
-          break;
-        case "week":
-          // Map to week of year
-          const onejan = new Date(date.getFullYear(), 0, 1);
-          const weekNum = Math.ceil(
-            ((date.getTime() - onejan.getTime()) / 86400000 +
-              onejan.getDay() +
-              1) /
-              7
-          );
-          factorIndex = weekNum - 1; // 0-indexed
-          break;
-        case "quarter":
-          // Map to quarter of year (0-3)
-          factorIndex = Math.floor(date.getMonth() / 3);
-          break;
-        default:
-          factorIndex = 0;
-      }
-
-      // Assign factor if within range
-      if (factorIndex >= 0 && factorIndex < seasonalFactors.length) {
-        dateSfMap[point.timestamp] = seasonalFactors[factorIndex];
-      }
-    });
+  const isGrouped = grouping !== "none";
+  if (isGrouped) {
+    return applySeasonalFactorsGrouped(
+      periodisedData as DataPoint[][],
+      seasonalFactors,
+      grouping as SeasonalityGrouping
+    );
   }
 
-  // Apply seasonal factors
-  data.forEach((point) => {
-    const sf = dateSfMap[point.timestamp];
-    if (sf !== undefined && sf !== 0) {
-      deseasonalizedData.push({
-        timestamp: point.timestamp,
-        value: roundToDecimalPrecision(point.value / sf),
-        confidence: point.confidence,
-      });
-    } else {
-      deseasonalizedData.push({ ...point });
+  // Build a map of date values to their seasonal factors (using YYYY-MM-DD format)
+  const dateSfMap: { [key: string]: { index: number; factor: number } } = {};
+
+  periodisedData.forEach((period) => {
+    for (let i = 0; i < period.length; i++) {
+      const d = period[i];
+      if (d === null) continue;
+
+      // Use YYYY-MM-DD format for consistent matching
+      const dateStr = new Date(d.timestamp).toISOString().slice(0, 10);
+      if (i < seasonalFactors.length) {
+        dateSfMap[dateStr] = { index: i, factor: seasonalFactors[i] };
+      }
     }
   });
 
-  return deseasonalizedData;
+  // Apply seasonal factors to the data - always return a result
+  const result = xData.map((d) => {
+    // Use YYYY-MM-DD format for consistent matching
+    const dateStr = new Date(d.timestamp).toISOString().slice(0, 10);
+
+    if (dateSfMap[dateStr]) {
+      const { index, factor } = dateSfMap[dateStr];
+      const deseasonalizedValue = factor !== 0 ? d.value / factor : d.value;
+
+      return {
+        timestamp: d.timestamp,
+        value: roundToDecimalPrecision(deseasonalizedValue),
+        confidence: d.confidence,
+      };
+    }
+
+    // If no seasonal factor found, return original data point
+    return { ...d };
+  });
+
+  return result;
 }
 
 /**
@@ -1840,16 +2041,18 @@ export function prepareSeasonalDataForTable(
 ): SeasonalData[] {
   if (data.length === 0) return [];
 
-  const periodisedData = periodiseData(data, period);
+  const periodisedData = periodiseData(data[0].timestamp, data, period);
   const seasonalData: SeasonalData[] = [];
 
   periodisedData.forEach((periodData, periodIdx) => {
     periodData.forEach((point, seasonIdx) => {
-      seasonalData.push({
-        timestamp: point.timestamp,
-        value: point.value,
-        season: seasonIdx + 1,
-      });
+      if (point !== null) {
+        seasonalData.push({
+          timestamp: point.timestamp,
+          value: point.value,
+          season: seasonIdx + 1,
+        });
+      }
     });
   });
 
