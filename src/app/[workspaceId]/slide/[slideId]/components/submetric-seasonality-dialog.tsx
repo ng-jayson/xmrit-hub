@@ -33,6 +33,8 @@ import type {
 import {
   calculateSeasonalFactors,
   prepareSeasonalDataForTable,
+  getPeriodDisableMap,
+  getPeriodCoverage,
 } from "@/lib/xmr-calculations";
 
 /**
@@ -89,6 +91,9 @@ interface SubmetricSeasonalityDialogProps {
     factors: number[],
     grouping: SeasonalityGrouping
   ) => void;
+  initialPeriod?: SeasonalityPeriod;
+  initialFactors?: number[];
+  initialGrouping?: SeasonalityGrouping;
 }
 
 export function SubmetricSeasonalityDialog({
@@ -96,24 +101,69 @@ export function SubmetricSeasonalityDialog({
   onOpenChange,
   dataPoints,
   onApplySeasonality,
+  initialPeriod = "year",
+  initialFactors = [],
+  initialGrouping = "none",
 }: SubmetricSeasonalityDialogProps) {
-  // Default to annual period with no grouping
-  const [period, setPeriod] = useState<SeasonalityPeriod>("year");
-  const [grouping, setGrouping] = useState<SeasonalityGrouping>("none");
+  // Initialize with provided values or defaults
+  const [period, setPeriod] = useState<SeasonalityPeriod>(initialPeriod);
+  const [grouping, setGrouping] =
+    useState<SeasonalityGrouping>(initialGrouping);
   const [editedDataPoints, setEditedDataPoints] =
     useState<DataPoint[]>(dataPoints);
-  const [seasonalFactors, setSeasonalFactors] = useState<number[]>([]);
+  const [seasonalFactors, setSeasonalFactors] =
+    useState<number[]>(initialFactors);
 
-  // Reset all state when dialog opens
+  // Compute period disable map and coverage from edited data
+  const periodDisableMap = useMemo(
+    () => getPeriodDisableMap(editedDataPoints),
+    [editedDataPoints]
+  );
+  const periodCoverage = useMemo(
+    () => getPeriodCoverage(editedDataPoints, period),
+    [editedDataPoints, period]
+  );
+
+  // Sync with parent state when provided initial values change
+  useEffect(() => {
+    if (initialPeriod && initialPeriod !== period) {
+      setPeriod(initialPeriod);
+    }
+  }, [initialPeriod]);
+
+  useEffect(() => {
+    if (initialGrouping && initialGrouping !== grouping) {
+      setGrouping(initialGrouping);
+    }
+  }, [initialGrouping]);
+
+  useEffect(() => {
+    if (initialFactors.length > 0 && initialFactors !== seasonalFactors) {
+      setSeasonalFactors(initialFactors);
+    }
+  }, [initialFactors]);
+
+  // Initialize state when dialog opens (preserve editedDataPoints if dialog was closed and reopened)
   useEffect(() => {
     if (open) {
-      setPeriod("year");
-      setGrouping("none");
-      setEditedDataPoints(dataPoints);
-      const { factors } = calculateSeasonalFactors(dataPoints, "year", "none");
-      setSeasonalFactors(factors);
+      // Only reset editedDataPoints if they're empty or if dataPoints changed significantly
+      if (
+        editedDataPoints.length === 0 ||
+        editedDataPoints.length !== dataPoints.length
+      ) {
+        setEditedDataPoints(dataPoints);
+      }
+      // Recalculate factors if we don't have initial factors or if edited data changed
+      if (initialFactors.length === 0) {
+        const { factors } = calculateSeasonalFactors(
+          editedDataPoints.length > 0 ? editedDataPoints : dataPoints,
+          period,
+          grouping
+        );
+        setSeasonalFactors(factors);
+      }
     }
-  }, [open, dataPoints]);
+  }, [open]);
 
   // Prepare seasonal data for table
   const seasonalData = useMemo(() => {
@@ -148,15 +198,25 @@ export function SubmetricSeasonalityDialog({
     return generateSeasonColors(maxSeason, isDarkMode);
   }, [seasonalData, isDarkMode]);
 
-  // Check if less than one year of data
-  const hasLessThanOneYear = useMemo(() => {
-    if (dataPoints.length < 2) return true;
-    const firstDate = new Date(dataPoints[0].timestamp);
-    const lastDate = new Date(dataPoints[dataPoints.length - 1].timestamp);
-    const diffTime = Math.abs(lastDate.getTime() - firstDate.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays < 365;
-  }, [dataPoints]);
+  // Check period coverage for warnings
+  const hasLessThanOnePeriod = useMemo(
+    () => periodCoverage < 1,
+    [periodCoverage]
+  );
+  const hasExactlyOnePeriod = useMemo(
+    () => periodCoverage >= 1 && periodCoverage < 1.1,
+    [periodCoverage]
+  );
+
+  // Check if seasonal factors calculation has warnings (uneven period lengths)
+  const hasSeasonalFactorWarning = useMemo(() => {
+    const { hasWarning } = calculateSeasonalFactors(
+      editedDataPoints,
+      period,
+      grouping
+    );
+    return hasWarning && grouping !== "none";
+  }, [editedDataPoints, period, grouping]);
 
   // Reset to original data and recalculate factors
   const handleResetToOriginal = useCallback(() => {
@@ -290,12 +350,46 @@ export function SubmetricSeasonalityDialog({
             below. In case of conflict, the latter wins.
           </p>
 
-          {/* Warning for less than one year */}
-          {hasLessThanOneYear && period === "year" && (
+          {/* Warning for less than one period */}
+          {hasLessThanOnePeriod && (
             <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
               <p className="text-sm text-red-800 dark:text-red-200">
-                De-seasonalising with less than one year of data will lead to
-                all data points being the same value.
+                Data spans less than one{" "}
+                {period === "year"
+                  ? "year"
+                  : period === "quarter"
+                  ? "quarter"
+                  : period === "month"
+                  ? "month"
+                  : "week"}
+                . De-seasonalising will flatten the data to a line.
+              </p>
+            </div>
+          )}
+
+          {/* Warning for exactly one period */}
+          {hasExactlyOnePeriod && !hasLessThanOnePeriod && (
+            <div className="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+              <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                Data spans exactly one{" "}
+                {period === "year"
+                  ? "year"
+                  : period === "quarter"
+                  ? "quarter"
+                  : period === "month"
+                  ? "month"
+                  : "week"}
+                . The result will be flat after de-seasonalising.
+              </p>
+            </div>
+          )}
+
+          {/* Warning for grouped seasonality with uneven periods */}
+          {hasSeasonalFactorWarning && (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <p className="text-sm text-red-800 dark:text-red-200">
+                Grouping when you don't have the same number of periods will
+                make some sub-periods artificially higher.
               </p>
             </div>
           )}
@@ -309,10 +403,21 @@ export function SubmetricSeasonalityDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="year">Annual</SelectItem>
-                  <SelectItem value="quarter">Quarterly</SelectItem>
-                  <SelectItem value="month">Monthly</SelectItem>
-                  <SelectItem value="week">Weekly</SelectItem>
+                  <SelectItem value="year" disabled={periodDisableMap.year}>
+                    Annual
+                  </SelectItem>
+                  <SelectItem
+                    value="quarter"
+                    disabled={periodDisableMap.quarter}
+                  >
+                    Quarterly
+                  </SelectItem>
+                  <SelectItem value="month" disabled={periodDisableMap.month}>
+                    Monthly
+                  </SelectItem>
+                  <SelectItem value="week" disabled={periodDisableMap.week}>
+                    Weekly
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>

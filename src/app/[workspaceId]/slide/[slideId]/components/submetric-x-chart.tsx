@@ -43,32 +43,32 @@ const CustomLabel = memo(
     payload: any;
     isDark: boolean;
   }) => {
-    const isViolation = payload?.isViolation;
-    const isRunningPoint = payload?.isRunningPoint;
-    const isFourNearLimit = payload?.isFourNearLimit;
-    const isTwoOfThreeBeyondTwoSigma = payload?.isTwoOfThreeBeyondTwoSigma;
+    const highestPriorityViolation = payload?.highestPriorityViolation;
 
     // Define colors based on theme and violation type
     const labelBgColor = isDark ? "#2a2a2a" : "#ffffff";
     const labelTextColor = isDark ? "#e5e5e5" : "#374151";
     const labelBorderColor = isDark ? "#404040" : "#e5e7eb";
 
-    // Determine color based on most severe violation
+    // Determine color based on highest priority violation
     let borderColor = labelBorderColor;
     let textColor = labelTextColor;
 
-    if (isViolation) {
+    if (highestPriorityViolation === "rule1") {
       borderColor = "#ef4444"; // red
       textColor = "#ef4444";
-    } else if (isTwoOfThreeBeyondTwoSigma) {
+    } else if (highestPriorityViolation === "rule4") {
       borderColor = "#f97316"; // orange
       textColor = "#f97316";
-    } else if (isFourNearLimit) {
+    } else if (highestPriorityViolation === "rule3") {
       borderColor = "#f59e0b"; // amber
       textColor = "#f59e0b";
-    } else if (isRunningPoint) {
+    } else if (highestPriorityViolation === "rule2") {
       borderColor = "#3b82f6"; // blue
       textColor = "#3b82f6";
+    } else if (highestPriorityViolation === "rule5") {
+      borderColor = "#10b981"; // green
+      textColor = "#10b981";
     }
 
     // Calculate text width (approximate: 11px font, ~6.5px per character)
@@ -160,13 +160,64 @@ export const SubmetricXChart = memo(
     const CustomTooltip = useCallback(
       ({ active, payload }: any) => {
         if (active && payload && payload.length) {
-          const data = payload[0].payload;
-          const hasViolations =
-            data.isViolation ||
-            data.isRunningPoint ||
-            data.isFourNearLimit ||
-            data.isTwoOfThreeBeyondTwoSigma ||
-            data.isFifteenWithinOneSigma;
+          // Find the payload entry with dataKey "value" (the main data line)
+          // This ensures we read the correct value even when trend lines are present
+          const valuePayload =
+            payload.find((p: any) => p.dataKey === "value") || payload[0];
+          const data = valuePayload.payload;
+          const highestPriorityViolation = data.highestPriorityViolation;
+
+          // Violation display configuration based on priority
+          const violationConfig: Record<
+            string,
+            {
+              color: string;
+              lightColor: string;
+              emoji: string;
+              title: string;
+              description: string;
+            }
+          > = {
+            rule1: {
+              color: "text-red-600",
+              lightColor: "text-red-500",
+              emoji: "🔴",
+              title: "Outside Control Limits",
+              description: "Rule 1: Point beyond 3σ",
+            },
+            rule4: {
+              color: "text-orange-600",
+              lightColor: "text-orange-500",
+              emoji: "🟠",
+              title: "2 of 3 Beyond 2σ",
+              description: "Rule 4: Clustering near limits",
+            },
+            rule3: {
+              color: "text-amber-600",
+              lightColor: "text-amber-500",
+              emoji: "🟡",
+              title: "4 Near Limit Pattern",
+              description: "Rule 3: 3 of 4 in extreme quartiles",
+            },
+            rule2: {
+              color: "text-blue-600",
+              lightColor: "text-blue-500",
+              emoji: "🔵",
+              title: "Running Point Pattern",
+              description: "Rule 2: 8+ points on one side",
+            },
+            rule5: {
+              color: "text-green-600",
+              lightColor: "text-green-500",
+              emoji: "🟢",
+              title: "Low Variation",
+              description: "Rule 5: 15+ points within 1σ",
+            },
+          };
+
+          const violation = highestPriorityViolation
+            ? violationConfig[highestPriorityViolation]
+            : null;
 
           return (
             <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg p-4 shadow-xl max-w-xs">
@@ -177,7 +228,7 @@ export const SubmetricXChart = memo(
 
                 <div className="space-y-1">
                   <p className="text-primary font-medium text-lg">
-                    {Number(payload[0].value).toFixed(2)}
+                    {Number(valuePayload.value).toFixed(2)}
                     {submetric.unit && (
                       <span className="text-sm text-muted-foreground ml-1">
                         {submetric.unit}
@@ -205,66 +256,26 @@ export const SubmetricXChart = memo(
                   </div>
                 </div>
 
-                {hasViolations && (
-                  <div className="pt-2 border-t space-y-1.5">
-                    <p className="text-xs font-semibold text-muted-foreground mb-1">
-                      Western Electric Rules:
+                {violation && (
+                  <div className="pt-2 border-t">
+                    <p className="text-xs font-semibold text-muted-foreground mb-1.5">
+                      Highest Priority Violation:
                     </p>
-                    {data.isViolation && (
-                      <div className="flex items-start gap-2 text-red-600 font-medium text-sm">
-                        <span className="text-base mt-0.5">🔴</span>
-                        <div>
-                          <div>Outside Control Limits</div>
-                          <div className="text-xs text-red-500 font-normal">
-                            Rule 1: Point beyond 3σ
-                          </div>
+                    <div
+                      className={`flex items-start gap-2 ${violation.color} font-medium text-sm`}
+                    >
+                      <span className="text-base mt-0.5">
+                        {violation.emoji}
+                      </span>
+                      <div>
+                        <div>{violation.title}</div>
+                        <div
+                          className={`text-xs ${violation.lightColor} font-normal`}
+                        >
+                          {violation.description}
                         </div>
                       </div>
-                    )}
-                    {data.isTwoOfThreeBeyondTwoSigma && (
-                      <div className="flex items-start gap-2 text-orange-600 font-medium text-sm">
-                        <span className="text-base mt-0.5">🟠</span>
-                        <div>
-                          <div>2 of 3 Beyond 2σ</div>
-                          <div className="text-xs text-orange-500 font-normal">
-                            Rule 4: Clustering near limits
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    {data.isFourNearLimit && (
-                      <div className="flex items-start gap-2 text-amber-600 font-medium text-sm">
-                        <span className="text-base mt-0.5">🟡</span>
-                        <div>
-                          <div>4 Near Limit Pattern</div>
-                          <div className="text-xs text-amber-500 font-normal">
-                            Rule 3: 3 of 4 in extreme quartiles
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    {data.isRunningPoint && (
-                      <div className="flex items-start gap-2 text-blue-600 font-medium text-sm">
-                        <span className="text-base mt-0.5">🔵</span>
-                        <div>
-                          <div>Running Point Pattern</div>
-                          <div className="text-xs text-blue-500 font-normal">
-                            Rule 2: 8+ points on one side
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    {data.isFifteenWithinOneSigma && (
-                      <div className="flex items-start gap-2 text-green-600 font-medium text-sm">
-                        <span className="text-base mt-0.5">🟢</span>
-                        <div>
-                          <div>Low Variation</div>
-                          <div className="text-xs text-green-500 font-normal">
-                            Rule 5: 15+ points within 1σ
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -280,45 +291,42 @@ export const SubmetricXChart = memo(
     const renderDot = useCallback(
       (props: any) => {
         const { cx, cy, payload, index } = props;
-        const isViolation = payload?.isViolation;
-        const isTwoOfThreeBeyondTwoSigma = payload?.isTwoOfThreeBeyondTwoSigma;
-        const isFourNearLimit = payload?.isFourNearLimit;
-        const isRunningPoint = payload?.isRunningPoint;
-        const isFifteenWithinOneSigma = payload?.isFifteenWithinOneSigma;
+        const highestPriorityViolation = payload?.highestPriorityViolation;
         const dotStroke = isDark ? "#2a2a2a" : "#ffffff";
 
-        // Determine color based on most severe violation
+        // Determine color and size based on highest priority violation
         let fillColor = submetric.color || "#3b82f6";
         let strokeColor = dotStroke;
         let radius = 4;
         let strokeWidth = 2;
         let hasViolation = false;
 
-        if (isViolation) {
+        // Map violation to colors and sizes (matching priority system)
+        if (highestPriorityViolation === "rule1") {
           fillColor = "#ef4444"; // red
           strokeColor = "#dc2626";
           radius = 6;
           strokeWidth = 3;
           hasViolation = true;
-        } else if (isTwoOfThreeBeyondTwoSigma) {
+        } else if (highestPriorityViolation === "rule4") {
           fillColor = "#f97316"; // orange
           strokeColor = "#ea580c";
           radius = 5.5;
           strokeWidth = 2.5;
           hasViolation = true;
-        } else if (isFourNearLimit) {
+        } else if (highestPriorityViolation === "rule3") {
           fillColor = "#f59e0b"; // amber
           strokeColor = "#d97706";
           radius = 5;
           strokeWidth = 2.5;
           hasViolation = true;
-        } else if (isRunningPoint) {
+        } else if (highestPriorityViolation === "rule2") {
           fillColor = "#3b82f6"; // blue
           strokeColor = "#2563eb";
           radius = 5;
           strokeWidth = 2.5;
           hasViolation = true;
-        } else if (isFifteenWithinOneSigma) {
+        } else if (highestPriorityViolation === "rule5") {
           fillColor = "#10b981"; // green
           strokeColor = "#059669";
           radius = 4.5;
@@ -350,19 +358,28 @@ export const SubmetricXChart = memo(
     const renderActiveDot = useCallback(
       (props: any) => {
         const { cx, cy, payload } = props;
-        const isViolation = payload?.isViolation;
-        const isRunningPoint = payload?.isRunningPoint;
+        const highestPriorityViolation = payload?.highestPriorityViolation;
 
-        // Determine colors based on point type
+        // Determine colors based on highest priority violation
         let fillColor = isDark ? "#2a2a2a" : "#ffffff";
         let strokeColor = submetric.color || "#3b82f6";
 
-        if (isViolation) {
+        // Map violation to colors (matching priority system)
+        if (highestPriorityViolation === "rule1") {
           fillColor = "#ef4444"; // red
           strokeColor = "#dc2626"; // darker red
-        } else if (isRunningPoint) {
+        } else if (highestPriorityViolation === "rule4") {
+          fillColor = "#f97316"; // orange
+          strokeColor = "#ea580c"; // darker orange
+        } else if (highestPriorityViolation === "rule3") {
           fillColor = "#f59e0b"; // amber
           strokeColor = "#d97706"; // darker amber
+        } else if (highestPriorityViolation === "rule2") {
+          fillColor = "#3b82f6"; // blue
+          strokeColor = "#2563eb"; // darker blue
+        } else if (highestPriorityViolation === "rule5") {
+          fillColor = "#10b981"; // green
+          strokeColor = "#059669"; // darker green
         }
 
         return (

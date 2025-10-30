@@ -94,6 +94,9 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
   const [trendGradient, setTrendGradient] = useState<number>(0);
   const [trendIntercept, setTrendIntercept] = useState<number>(0);
   const [showReducedTrendLimits, setShowReducedTrendLimits] = useState(false);
+  const [storedTrendLines, setStoredTrendLines] = useState<TrendLimits | null>(
+    null
+  );
 
   // Seasonality state
   const [isSeasonalityDialogOpen, setIsSeasonalityDialogOpen] = useState(false);
@@ -173,11 +176,28 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     ) {
       const stats = calculateRegressionStats(rawDataPoints);
       if (stats) {
+        // Calculate EVERYTHING upfront before setting state
+        // This prevents race conditions and ensures consistent data
+
+        // First, get base XMR data to get avgMovement
+        const baseData = generateXMRData(rawDataPoints);
+
+        // Calculate trend lines with the stats and avgMovement
+        const calculatedTrendLines = createTrendLines(
+          {
+            m: stats.m,
+            c: stats.c,
+            avgMR: baseData.limits.avgMovement,
+          },
+          rawDataPoints
+        );
+
+        // Now set all state atomically
         setTrendGradient(stats.m);
         setTrendIntercept(stats.c);
+        setStoredTrendLines(calculatedTrendLines);
         setTrendActive(true);
         setAutoAppliedTrend(true);
-        // Clear lock limits if active
         setIsLimitsLocked(false);
         setLockedLimits(null);
       }
@@ -195,7 +215,8 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
       const detectedPeriod = determinePeriodicity(rawDataPoints);
       const { factors } = calculateSeasonalFactors(
         rawDataPoints,
-        detectedPeriod
+        detectedPeriod,
+        "none" // No grouping for auto-apply
       );
 
       if (factors.length > 0) {
@@ -263,12 +284,19 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
       processed = applySeasonalFactors(
         processed,
         seasonalFactors,
-        seasonalityPeriod
+        seasonalityPeriod,
+        seasonalityGrouping
       );
     }
 
     return processed;
-  }, [rawDataPoints, seasonalityActive, seasonalFactors, seasonalityPeriod]);
+  }, [
+    rawDataPoints,
+    seasonalityActive,
+    seasonalFactors,
+    seasonalityPeriod,
+    seasonalityGrouping,
+  ]);
 
   // Generate base XMR data first (needed for avgMovement in trend calculations)
   const baseXmrData = useMemo(() => {
@@ -281,6 +309,13 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
       return null;
     }
 
+    // If we have stored trend lines (from auto-apply), use those
+    // This ensures consistency during initial render
+    if (storedTrendLines) {
+      return storedTrendLines;
+    }
+
+    // Otherwise, calculate trend lines (for manual apply)
     const stats = {
       m: trendGradient,
       c: trendIntercept,
@@ -294,6 +329,7 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     trendIntercept,
     processedDataPoints,
     baseXmrData.limits.avgMovement,
+    storedTrendLines,
   ]);
 
   // Memoize XMR data generation with trend/locked limits support
@@ -396,6 +432,21 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
       // Check if range exceeds URL (for MR chart)
       const isRangeViolation = point.range > xmrData.limits.URL;
 
+      // Determine highest priority violation (for tooltip and hover display)
+      // Priority: Rule 1 > Rule 4 > Rule 3 > Rule 2 > Rule 5
+      let highestPriorityViolation: string | null = null;
+      if (isViolation) {
+        highestPriorityViolation = "rule1"; // Outside Control Limits
+      } else if (isTwoOfThreeBeyondTwoSigma) {
+        highestPriorityViolation = "rule4"; // 2 of 3 Beyond 2σ
+      } else if (isFourNearLimit) {
+        highestPriorityViolation = "rule3"; // 4 Near Limit Pattern
+      } else if (isRunningPoint) {
+        highestPriorityViolation = "rule2"; // Running Point Pattern
+      } else if (isFifteenWithinOneSigma) {
+        highestPriorityViolation = "rule5"; // Low Variation
+      }
+
       // Format timestamp with or without year depending on whether data spans multiple years
       const timestampFormat = spansMultipleYears
         ? date.toLocaleDateString("en-GB", {
@@ -421,6 +472,7 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
         isTwoOfThreeBeyondTwoSigma,
         isFifteenWithinOneSigma,
         isRangeViolation,
+        highestPriorityViolation, // Add the highest priority violation
       };
     });
   }, [
@@ -778,6 +830,7 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     setTrendGradient(gradient);
     setTrendIntercept(intercept);
     setTrendActive(true);
+    setStoredTrendLines(null); // Clear stored lines to force recalculation
 
     // Clear incompatible states when applying trend
     setIsLimitsLocked(false);
@@ -790,6 +843,7 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     setTrendActive(false);
     setTrendGradient(0);
     setTrendIntercept(0);
+    setStoredTrendLines(null); // Clear stored trend lines
 
     // Don't reset autoLockAttempted - auto-lock should only trigger on initial load
     // or when explicitly requested via "Reset to Auto Lock Limit"
@@ -804,6 +858,7 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     setSeasonalityGrouping(grouping);
     setSeasonalFactors(factors);
     setSeasonalityActive(true);
+    setStoredTrendLines(null); // Clear stored lines as data changes
 
     // Clear incompatible states when applying seasonality
     setIsLimitsLocked(false);
@@ -815,6 +870,7 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
   const handleRemoveSeasonality = () => {
     setSeasonalityActive(false);
     setSeasonalFactors([]);
+    setStoredTrendLines(null); // Clear stored lines as data changes
 
     // Don't reset autoLockAttempted - auto-lock should only trigger on initial load
     // or when explicitly requested via "Reset to Auto Lock Limit"
@@ -903,7 +959,7 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
                   className="gap-2 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950"
                 >
                   <X className="h-4 w-4" />
-                  Remove Seasonality
+                  Remove Deseasonalisation
                 </Button>
               )}
 
@@ -1027,7 +1083,10 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
 
       <CardContent className="pt-0">
         {hasData ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2">
+          <div
+            className="grid grid-cols-1 lg:grid-cols-2"
+            key={`chart-${trendActive}-${!!trendLines}-${isLimitsLocked}-${seasonalityActive}`}
+          >
             {/* X Chart */}
             <SubmetricXChart
               chartData={chartData}
@@ -1097,6 +1156,9 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
         onOpenChange={setIsSeasonalityDialogOpen}
         dataPoints={rawDataPoints}
         onApplySeasonality={handleApplySeasonality}
+        initialPeriod={seasonalityPeriod}
+        initialFactors={seasonalFactors}
+        initialGrouping={seasonalityGrouping}
       />
     </Card>
   );

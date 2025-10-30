@@ -1410,6 +1410,84 @@ export function determinePeriodicity(data: DataPoint[]): SeasonalityPeriod {
 }
 
 /**
+ * Get a map of which periods should be disabled based on data granularity
+ * Mirrors main3.ts logic for minimum data granularity requirements
+ *
+ * Rules (from main3.ts lines 2108-2125):
+ * - quarter interval: disable quarter, month, week (allow only year)
+ * - month interval: disable month, week (allow quarter, year)
+ * - week interval: disable week (allow month, quarter, year)
+ * - else (day or finer): enable all
+ */
+export function getPeriodDisableMap(
+  data: DataPoint[]
+): Record<SeasonalityPeriod, boolean> {
+  const interval = determinePeriodicity(data);
+
+  // Default: all enabled
+  const disableMap: Record<SeasonalityPeriod, boolean> = {
+    year: false,
+    quarter: false,
+    month: false,
+    week: false,
+  };
+
+  // Apply disable rules based on detected interval
+  if (interval === "quarter") {
+    // Quarterly data: only year allowed
+    disableMap.quarter = true;
+    disableMap.month = true;
+    disableMap.week = true;
+  } else if (interval === "month") {
+    // Monthly data: quarter and year allowed
+    disableMap.month = true;
+    disableMap.week = true;
+  } else if (interval === "week") {
+    // Weekly data: month, quarter, year allowed
+    disableMap.week = true;
+  }
+  // else: all periods enabled (daily or finer data)
+
+  return disableMap;
+}
+
+/**
+ * Calculate how many complete periods the data spans
+ * Returns a fractional number (e.g., 0.5, 1.0, 2.5)
+ * Used to warn when < 1 period (will flatten) or = 1 period (will be flat)
+ */
+export function getPeriodCoverage(
+  data: DataPoint[],
+  period: SeasonalityPeriod
+): number {
+  if (data.length < 2) return 0;
+
+  const firstDate = new Date(data[0].timestamp);
+  const lastDate = new Date(data[data.length - 1].timestamp);
+
+  // Calculate time difference in the appropriate unit
+  const diffTime = lastDate.getTime() - firstDate.getTime();
+  const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+  // Convert to period units
+  switch (period) {
+    case "week":
+      return diffDays / 7;
+    case "month":
+      // Approximate: 30.44 days per month on average
+      return diffDays / 30.44;
+    case "quarter":
+      // Approximate: 91.31 days per quarter on average
+      return diffDays / 91.31;
+    case "year":
+      // 365.25 days per year on average (accounting for leap years)
+      return diffDays / 365.25;
+    default:
+      return 0;
+  }
+}
+
+/**
  * Periodize data based on period
  * This creates a 2D array where each sub-array represents one period (year/quarter/etc)
  * and contains all data points within that period in chronological order
@@ -1638,19 +1716,32 @@ export function calculateSeasonalFactors(
       .map((d) => d.value);
 
     if (validValues.length === 0) {
-      subPeriodAggregates.push(1);
+      // No valid data for this sub-period - will result in NaN factor
+      subPeriodAggregates.push(NaN);
     } else {
       subPeriodAggregates.push(aggregate(validValues));
     }
   }
 
-  // Calculate overall average and seasonal factors
+  // Calculate overall average based on grouping mode (matches main3.ts lines 535-539)
   const overallAvg =
-    subPeriodAggregates.reduce((sum, val) => sum + val, 0) /
-    subPeriodAggregates.length;
+    grouping !== "none"
+      ? // Grouped: use subPeriodAggregates (including NaN for missing)
+        subPeriodAggregates
+          .filter((v) => !isNaN(v))
+          .reduce((sum, val) => sum + val, 0) /
+        subPeriodAggregates.filter((v) => !isNaN(v)).length
+      : // Non-grouped: use all original data values
+        data
+          .filter((d) => d.value != null)
+          .reduce((sum, d) => sum + d.value, 0) /
+        data.filter((d) => d.value != null).length;
 
-  const seasonalFactors = subPeriodAggregates.map(
-    (v) => roundToDecimalPrecision(v / overallAvg, 4) // Use 4 decimal places for seasonal factors
+  // Calculate seasonal factors (matches main3.ts line 541-543)
+  const seasonalFactors = subPeriodAggregates.map((v) =>
+    isNaN(v) || overallAvg === 0
+      ? 1.0 // Default to 1.0 for missing data (main3.ts uses isNaN check)
+      : roundToDecimalPrecision(v / overallAvg, 4)
   );
 
   return { factors: seasonalFactors, hasWarning };
@@ -1662,25 +1753,66 @@ export function calculateSeasonalFactors(
 export function applySeasonalFactors(
   data: DataPoint[],
   seasonalFactors: number[],
-  period: SeasonalityPeriod = "year"
+  period: SeasonalityPeriod = "year",
+  grouping: SeasonalityGrouping = "none"
 ): DataPoint[] {
   if (data.length === 0 || seasonalFactors.length === 0) {
     return data;
   }
 
-  const periodisedData = periodiseData(data, period);
   const deseasonalizedData: DataPoint[] = [];
 
   // Build a map of date to seasonal factor
   const dateSfMap: { [key: string]: number } = {};
 
-  periodisedData.forEach((periodData) => {
-    periodData.forEach((point, i) => {
-      if (i < seasonalFactors.length) {
-        dateSfMap[point.timestamp] = seasonalFactors[i];
+  if (grouping === "none") {
+    // Original behavior: use periodiseData for ungrouped data
+    const periodisedData = periodiseData(data, period);
+
+    periodisedData.forEach((periodData) => {
+      periodData.forEach((point, i) => {
+        if (i < seasonalFactors.length) {
+          dateSfMap[point.timestamp] = seasonalFactors[i];
+        }
+      });
+    });
+  } else {
+    // Grouped behavior: map each point to its group within the period
+    data.forEach((point) => {
+      const date = new Date(point.timestamp);
+      let factorIndex: number;
+
+      // Determine which factor to use based on grouping
+      switch (grouping) {
+        case "month":
+          // Map to month of year (0-11)
+          factorIndex = date.getMonth();
+          break;
+        case "week":
+          // Map to week of year
+          const onejan = new Date(date.getFullYear(), 0, 1);
+          const weekNum = Math.ceil(
+            ((date.getTime() - onejan.getTime()) / 86400000 +
+              onejan.getDay() +
+              1) /
+              7
+          );
+          factorIndex = weekNum - 1; // 0-indexed
+          break;
+        case "quarter":
+          // Map to quarter of year (0-3)
+          factorIndex = Math.floor(date.getMonth() / 3);
+          break;
+        default:
+          factorIndex = 0;
+      }
+
+      // Assign factor if within range
+      if (factorIndex >= 0 && factorIndex < seasonalFactors.length) {
+        dateSfMap[point.timestamp] = seasonalFactors[factorIndex];
       }
     });
-  });
+  }
 
   // Apply seasonal factors
   data.forEach((point) => {
