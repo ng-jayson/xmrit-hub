@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Trash2 } from "lucide-react";
+import { Trash2, Undo2 } from "lucide-react";
 import {
   type XMRLimits,
   type DataPoint,
@@ -32,9 +32,17 @@ interface SubmetricLockLimitsDialogProps {
   onOpenChange: (open: boolean) => void;
   dataPoints: DataPoint[];
   currentLimits: XMRLimits;
-  onLockLimits: (limits: XMRLimits) => void;
+  onLockLimits: (
+    limits: XMRLimits,
+    isManuallyModified: boolean,
+    excludedIndices: number[]
+  ) => void;
   submetricName: string;
   outlierIndices?: number[];
+  isCurrentLimitsManuallyLocked?: boolean;
+  autoDetectedOutliers?: number[];
+  onResetToAutoLock?: () => void;
+  isAutoLocked?: boolean;
 }
 
 // Memoized table row component to prevent unnecessary re-renders
@@ -77,17 +85,25 @@ const DataPointRow = memo(
             variant="ghost"
             size="sm"
             onClick={() => onExclude(index)}
-            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+            className={`h-8 w-8 p-0 ${
+              isExcluded
+                ? "text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
+                : "text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+            }`}
             disabled={!canExclude}
             title={
               !canExclude
                 ? "Cannot exclude - minimum 3 data points required"
                 : isExcluded
-                ? "Include row"
+                ? "Include row back"
                 : "Exclude row"
             }
           >
-            <Trash2 className="h-4 w-4" />
+            {isExcluded ? (
+              <Undo2 className="h-4 w-4" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
           </Button>
         </TableCell>
       </TableRow>
@@ -105,6 +121,10 @@ export function SubmetricLockLimitsDialog({
   onLockLimits,
   submetricName,
   outlierIndices = [],
+  isCurrentLimitsManuallyLocked = false,
+  autoDetectedOutliers = [],
+  onResetToAutoLock,
+  isAutoLocked = false,
 }: SubmetricLockLimitsDialogProps) {
   // State for editable data points (never actually removed, just marked as excluded)
   const [editedDataPoints, setEditedDataPoints] =
@@ -168,6 +188,9 @@ export function SubmetricLockLimitsDialog({
     url: false,
   });
 
+  // Track if user made any changes (for determining manual vs auto lock)
+  const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
+
   // Reset inputs and modification state when dialog opens
   useEffect(() => {
     if (open) {
@@ -176,6 +199,8 @@ export function SubmetricLockLimitsDialog({
       setLnpl(currentLimits.LNPL.toFixed(2));
       setAvgMovement(currentLimits.avgMovement.toFixed(2));
       setUrl(currentLimits.URL.toFixed(2));
+
+      // Always reset field modification flags (to allow auto-recalculation)
       setIsModified({
         avgX: false,
         unpl: false,
@@ -183,14 +208,60 @@ export function SubmetricLockLimitsDialog({
         avgMovement: false,
         url: false,
       });
+
+      // If current limits were manually locked, preserve that status
+      // This ensures manual lock state persists even when making additional changes
+      if (isCurrentLimitsManuallyLocked) {
+        setHasUserMadeChanges(true);
+      } else {
+        setHasUserMadeChanges(false);
+      }
     }
-  }, [open, currentLimits]);
+  }, [open, currentLimits, isCurrentLimitsManuallyLocked]);
+
+  // Auto-recalculate limits when data or exclusions change
+  // This provides real-time feedback as user modifies data or exclusions
+  useEffect(() => {
+    if (!open) return;
+
+    // Check if any manual field modifications exist
+    const hasManualModifications = Object.values(isModified).some((v) => v);
+
+    // Only auto-calculate if no manual modifications to limit fields
+    // This allows the user to see live updates while preserving manual overrides
+    if (!hasManualModifications) {
+      const recalculated = calculateXMRFromCurrentState();
+      setAvgX(recalculated.limits.avgX.toFixed(2));
+      setUnpl(recalculated.limits.UNPL.toFixed(2));
+      setLnpl(recalculated.limits.LNPL.toFixed(2));
+      setAvgMovement(recalculated.limits.avgMovement.toFixed(2));
+      setUrl(recalculated.limits.URL.toFixed(2));
+    }
+  }, [
+    editedDataPoints,
+    excludedIndices,
+    useMedian,
+    open,
+    calculateXMRFromCurrentState,
+    isModified,
+  ]);
 
   // Reset data points to original (clears all exclusions)
   const handleResetToOriginal = useCallback(() => {
     setEditedDataPoints(dataPoints);
     setExcludedIndices([]); // Clear all exclusions to show all original values
+
+    // Mark that user has made changes (clicking reset is a user action)
+    setHasUserMadeChanges(true);
   }, [dataPoints]);
+
+  // Reset to auto-lock state (restores auto-detected outliers)
+  const handleResetToAutoLock = useCallback(() => {
+    if (onResetToAutoLock) {
+      onResetToAutoLock();
+      onOpenChange(false); // Close the dialog after reset
+    }
+  }, [onResetToAutoLock, onOpenChange]);
 
   // Handle data point value edit
   const handleEditValue = useCallback((index: number, newValue: string) => {
@@ -206,6 +277,9 @@ export function SubmetricLockLimitsDialog({
       setExcludedIndices((prevIndices) =>
         prevIndices.filter((i) => i !== index)
       );
+
+      // Mark that user has made changes
+      setHasUserMadeChanges(true);
     }
   }, []);
 
@@ -220,14 +294,19 @@ export function SubmetricLockLimitsDialog({
         return [...prevIndices, index];
       }
     });
+
+    // Mark that user has made changes
+    setHasUserMadeChanges(true);
   }, []);
 
-  // Validate and apply lock limits (recalculate before applying)
+  // Validate and apply lock limits
+  // Uses recalculated limits as fallback if user hasn't entered manual values
   const handleLockLimits = () => {
-    // Recalculate limits from current edited data
+    // Recalculate limits from current edited data as baseline
     const xmrData = calculateXMRFromCurrentState();
     const recalculatedLimits = xmrData.limits;
 
+    // Parse user inputs, fallback to recalculated values
     const parsedAvgX = parseFloat(avgX) || recalculatedLimits.avgX;
     const parsedUnpl = parseFloat(unpl) || recalculatedLimits.UNPL;
     const parsedLnpl = parseFloat(lnpl) || recalculatedLimits.LNPL;
@@ -235,19 +314,37 @@ export function SubmetricLockLimitsDialog({
       parseFloat(avgMovement) || recalculatedLimits.avgMovement;
     const parsedUrl = parseFloat(url) || recalculatedLimits.URL;
 
-    // Validate limits
+    // Comprehensive validation
+    // Rule 1: Average must be between lower and upper limits
     if (parsedAvgX < parsedLnpl || parsedAvgX > parsedUnpl) {
       alert(
-        "Please ensure that the following limits are satisfied:\n" +
-          "1. Average X is between Lower Natural Process Limit (LNPL) and Upper Natural Process Limit (UNPL)"
+        "Validation Error:\n\n" +
+          "Average X must be between LNPL and UNPL.\n" +
+          `Current: Avg X = ${parsedAvgX.toFixed(2)}, ` +
+          `LNPL = ${parsedLnpl.toFixed(2)}, ` +
+          `UNPL = ${parsedUnpl.toFixed(2)}`
       );
       return;
     }
 
+    // Rule 2: Average movement must not exceed upper range limit
     if (parsedAvgMovement > parsedUrl) {
       alert(
-        "Please ensure that the following limits are satisfied:\n" +
-          "2. Average Movement is less than or equal to Upper Range Limit (URL)"
+        "Validation Error:\n\n" +
+          "Average Movement must be ≤ URL.\n" +
+          `Current: Avg Movement = ${parsedAvgMovement.toFixed(2)}, ` +
+          `URL = ${parsedUrl.toFixed(2)}`
+      );
+      return;
+    }
+
+    // Rule 3: Ensure positive control range
+    if (parsedUnpl <= parsedLnpl) {
+      alert(
+        "Validation Error:\n\n" +
+          "UNPL must be greater than LNPL.\n" +
+          `Current: UNPL = ${parsedUnpl.toFixed(2)}, ` +
+          `LNPL = ${parsedLnpl.toFixed(2)}`
       );
       return;
     }
@@ -256,15 +353,26 @@ export function SubmetricLockLimitsDialog({
     const lowerQuartile = (parsedAvgX + parsedLnpl) / 2;
     const upperQuartile = (parsedAvgX + parsedUnpl) / 2;
 
-    onLockLimits({
-      avgX: Math.round(parsedAvgX * 100) / 100,
-      UNPL: Math.round(parsedUnpl * 100) / 100,
-      LNPL: Math.round(parsedLnpl * 100) / 100,
-      avgMovement: Math.round(parsedAvgMovement * 100) / 100,
-      URL: Math.round(parsedUrl * 100) / 100,
-      lowerQuartile: Math.round(lowerQuartile * 100) / 100,
-      upperQuartile: Math.round(upperQuartile * 100) / 100,
-    });
+    // Determine lock type: manual (user made changes) vs auto (accepted auto-detected limits)
+    const hasManualLimitModifications = Object.values(isModified).some(
+      (v) => v
+    );
+    const isManuallyModified =
+      hasUserMadeChanges || hasManualLimitModifications;
+
+    onLockLimits(
+      {
+        avgX: Math.round(parsedAvgX * 100) / 100,
+        UNPL: Math.round(parsedUnpl * 100) / 100,
+        LNPL: Math.round(parsedLnpl * 100) / 100,
+        avgMovement: Math.round(parsedAvgMovement * 100) / 100,
+        URL: Math.round(parsedUrl * 100) / 100,
+        lowerQuartile: Math.round(lowerQuartile * 100) / 100,
+        upperQuartile: Math.round(upperQuartile * 100) / 100,
+      },
+      isManuallyModified,
+      excludedIndices // Pass the current excluded indices
+    );
 
     onOpenChange(false);
   };
@@ -308,10 +416,31 @@ export function SubmetricLockLimitsDialog({
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col gap-4 pr-2">
           {/* Description */}
-          <p className="text-sm text-muted-foreground">
-            Edit or remove data points below and click "Recalculate Limits", or
-            manually enter limit values. Manual values take precedence.
-          </p>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Edit or remove data points below, or manually enter limit values.
+              Manual values take precedence. Click the trash icon to exclude
+              data points, or the undo icon to include them back.
+            </p>
+            {outlierIndices.length > 0 && (
+              <p className="text-sm font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 p-3 rounded-md border border-amber-200 dark:border-amber-800">
+                {isCurrentLimitsManuallyLocked ? (
+                  <>
+                    📋 {outlierIndices.length} data point
+                    {outlierIndices.length !== 1 ? "s" : ""} excluded (shown
+                    below). Click the undo icon to include them back
+                    individually.
+                  </>
+                ) : (
+                  <>
+                    ⚠️ Auto-detected {outlierIndices.length} outlier
+                    {outlierIndices.length !== 1 ? "s" : ""} (shown as excluded
+                    below). Review and adjust as needed before locking.
+                  </>
+                )}
+              </p>
+            )}
+          </div>
 
           {/* Limit Inputs */}
           <div className="grid grid-cols-3 gap-4">
@@ -324,6 +453,7 @@ export function SubmetricLockLimitsDialog({
                 onChange={(e) => {
                   setAvgX(e.target.value);
                   setIsModified((prev) => ({ ...prev, avgX: true }));
+                  setHasUserMadeChanges(true);
                 }}
                 placeholder={currentLimits.avgX.toString()}
                 className={isModified.avgX ? "border-red-500" : ""}
@@ -340,6 +470,7 @@ export function SubmetricLockLimitsDialog({
                 onChange={(e) => {
                   setUnpl(e.target.value);
                   setIsModified((prev) => ({ ...prev, unpl: true }));
+                  setHasUserMadeChanges(true);
                 }}
                 placeholder={currentLimits.UNPL.toString()}
                 className={isModified.unpl ? "border-red-500" : ""}
@@ -356,6 +487,7 @@ export function SubmetricLockLimitsDialog({
                 onChange={(e) => {
                   setLnpl(e.target.value);
                   setIsModified((prev) => ({ ...prev, lnpl: true }));
+                  setHasUserMadeChanges(true);
                 }}
                 placeholder={currentLimits.LNPL.toString()}
                 className={isModified.lnpl ? "border-red-500" : ""}
@@ -373,6 +505,7 @@ export function SubmetricLockLimitsDialog({
                 onChange={(e) => {
                   setAvgMovement(e.target.value);
                   setIsModified((prev) => ({ ...prev, avgMovement: true }));
+                  setHasUserMadeChanges(true);
                 }}
                 placeholder={currentLimits.avgMovement.toString()}
                 className={isModified.avgMovement ? "border-red-500" : ""}
@@ -389,6 +522,7 @@ export function SubmetricLockLimitsDialog({
                 onChange={(e) => {
                   setUrl(e.target.value);
                   setIsModified((prev) => ({ ...prev, url: true }));
+                  setHasUserMadeChanges(true);
                 }}
                 placeholder={currentLimits.URL.toString()}
                 className={isModified.url ? "border-red-500" : ""}
@@ -416,6 +550,18 @@ export function SubmetricLockLimitsDialog({
                 </span>
               </div>
               <div className="flex gap-3">
+                {!isAutoLocked &&
+                  onResetToAutoLock &&
+                  autoDetectedOutliers.length > 0 && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={handleResetToAutoLock}
+                      className="h-auto p-0 text-green-600 hover:text-green-700"
+                    >
+                      Reset to Auto Lock
+                    </Button>
+                  )}
                 <Button
                   variant="link"
                   size="sm"

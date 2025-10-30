@@ -75,7 +75,18 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
   const [lockedLimits, setLockedLimits] = useState<XMRLimits | null>(null);
   const [isLimitsLocked, setIsLimitsLocked] = useState(false);
   const [autoLocked, setAutoLocked] = useState(false);
-  const [outlierIndices, setOutlierIndices] = useState<number[]>([]);
+  const [autoLockAttempted, setAutoLockAttempted] = useState(false); // Track if auto-lock has been attempted
+  const [hasEverBeenManuallyModified, setHasEverBeenManuallyModified] =
+    useState(false); // Track if chart has ever been manually modified
+  const [outlierIndices, setOutlierIndices] = useState<number[]>([]); // Auto-detected outliers
+  const [originalAutoOutliers, setOriginalAutoOutliers] = useState<number[]>(
+    []
+  ); // Store original auto-detected outliers
+  const [manuallyExcludedIndices, setManuallyExcludedIndices] = useState<
+    number[]
+  >([]); // Manually excluded points
+  const [autoSuggestedLimits, setAutoSuggestedLimits] =
+    useState<XMRLimits | null>(null);
 
   // Trend state
   const [isTrendDialogOpen, setIsTrendDialogOpen] = useState(false);
@@ -192,6 +203,9 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
         setSeasonalFactors(factors);
         setSeasonalityActive(true);
         setAutoAppliedSeasonality(true);
+        // Clear lock limits if active (seasonality changes the data)
+        setIsLimitsLocked(false);
+        setLockedLimits(null);
       }
     }
   }, [
@@ -201,34 +215,43 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     rawDataPoints,
   ]);
 
-  // Auto-lock effect (runs once on data load) - only if not using trend/seasonality
+  // Auto-lock effect - automatically locks limits when outliers are detected
+  // Only runs ONCE on initial load when: no trend/seasonality active, sufficient data, and not manually locked
+  // Will NOT re-trigger when removing trend/seasonality - only on initial load or explicit reset
   useEffect(() => {
     if (
-      !isLimitsLocked &&
-      !autoLocked &&
+      !autoLockAttempted &&
       !trendActive &&
       !seasonalityActive &&
       !labelHasTrend &&
       !labelHasSeasonality &&
+      !isLimitsLocked && // Don't override manual locks
       rawDataPoints.length >= MINIMUM_XMR_DATA_POINTS
     ) {
       const shouldAutoLock = shouldAutoLockLimits(rawDataPoints);
       if (shouldAutoLock) {
         const result = calculateLimitsWithOutlierRemoval(rawDataPoints);
+        // Automatically lock with detected outliers excluded
         setLockedLimits(result.limits);
         setIsLimitsLocked(true);
-        setAutoLocked(true);
+        setAutoSuggestedLimits(result.limits);
         setOutlierIndices(result.outlierIndices);
+        setOriginalAutoOutliers(result.outlierIndices); // Store original auto-detected outliers
+        setAutoLocked(true);
+        setAutoLockAttempted(true);
+      } else {
+        // Mark as attempted even if no outliers found to prevent repeated checks
+        setAutoLockAttempted(true);
       }
     }
   }, [
     rawDataPoints,
-    isLimitsLocked,
-    autoLocked,
+    autoLockAttempted,
     trendActive,
     seasonalityActive,
     labelHasTrend,
     labelHasSeasonality,
+    isLimitsLocked,
   ]);
 
   // Process data based on active filters (trend/seasonality)
@@ -308,6 +331,41 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     return baseXmrData;
   }, [baseXmrData, isLimitsLocked, lockedLimits, trendActive, trendLines]);
 
+  // Calculate unified effective limits based on active state
+  // This is used for consistent traffic light calculations
+  const effectiveLimits = useMemo(() => {
+    if (trendActive && trendLines) {
+      // For trend, use the limits at the last point
+      const lastIndex = xmrData.dataPoints.length - 1;
+      return {
+        avgX: trendLines.centreLine[lastIndex]?.value ?? xmrData.limits.avgX,
+        UNPL: trendLines.unpl[lastIndex]?.value ?? xmrData.limits.UNPL,
+        LNPL: trendLines.lnpl[lastIndex]?.value ?? xmrData.limits.LNPL,
+        avgMovement: xmrData.limits.avgMovement,
+        URL: xmrData.limits.URL,
+        lowerQuartile:
+          trendLines.lowerQuartile[lastIndex]?.value ??
+          xmrData.limits.lowerQuartile,
+        upperQuartile:
+          trendLines.upperQuartile[lastIndex]?.value ??
+          xmrData.limits.upperQuartile,
+      };
+    } else if (isLimitsLocked && lockedLimits) {
+      // Use locked limits
+      return lockedLimits;
+    } else {
+      // Use default calculated limits
+      return xmrData.limits;
+    }
+  }, [
+    trendActive,
+    trendLines,
+    isLimitsLocked,
+    lockedLimits,
+    xmrData.limits,
+    xmrData.dataPoints.length,
+  ]);
+
   // Memoize process control status
   const processInControl = useMemo(
     () => isProcessInControl(xmrData.limits),
@@ -381,24 +439,13 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     const lastPoint = chartData[chartData.length - 1];
     const lastIndex = chartData.length - 1;
 
-    // Use trend-relative limits when trend is active, otherwise use static limits
-    const effectiveAvgX =
-      trendActive && trendLines
-        ? trendLines.centreLine[lastIndex]?.value ?? xmrData.limits.avgX
-        : xmrData.limits.avgX;
-
-    const effectiveUNPL =
-      trendActive && trendLines
-        ? trendLines.unpl[lastIndex]?.value ?? xmrData.limits.UNPL
-        : xmrData.limits.UNPL;
-
-    const effectiveLNPL =
-      trendActive && trendLines
-        ? trendLines.lnpl[lastIndex]?.value ?? xmrData.limits.LNPL
-        : xmrData.limits.LNPL;
-
-    const { avgMovement } = xmrData.limits;
-    const { UNPL, LNPL, avgX } = xmrData.limits; // Keep for reference/calculations
+    // Use unified effective limits (accounts for trend, locked, or default state)
+    const {
+      avgX: effectiveAvgX,
+      UNPL: effectiveUNPL,
+      LNPL: effectiveLNPL,
+      avgMovement,
+    } = effectiveLimits;
 
     // Look at last 5 points for trend analysis (or all available if less than 5)
     const lookbackWindow = Math.min(5, chartData.length);
@@ -450,15 +497,33 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     const normalizedPosition = (lastPoint.value - effectiveLNPL) / controlRange;
 
     // --- IMPROVED VARIANCE DETECTION ---
-    // 5A. Compare last point to BASELINE (average of previous points excluding last)
+    // 5A. Compare last point to EXPECTED BASELINE (considering active state: trend/locked/default)
     const baselineWindow = Math.min(4, chartData.length - 1); // Previous 3-4 points (not including last)
+    const baselineIndices = Array.from(
+      { length: baselineWindow },
+      (_, i) => chartData.length - baselineWindow - 1 + i
+    );
+
+    // Calculate expected baseline based on effective limits
+    // For trend, use trend line values; otherwise use static average
+    const expectedBaseline =
+      trendActive && trendLines
+        ? baselineIndices.reduce((sum, idx) => {
+            return sum + (trendLines.centreLine[idx]?.value ?? effectiveAvgX);
+          }, 0) / baselineWindow
+        : effectiveAvgX;
+
+    // Get actual baseline from data for comparison
     const baselinePoints = chartData.slice(-baselineWindow - 1, -1); // Exclude last point
     const baselineValues = baselinePoints.map((p) => p.value);
-    const baselineMean =
+    const actualBaseline =
       baselineValues.length > 0
         ? baselineValues.reduce((sum, val) => sum + val, 0) /
           baselineValues.length
         : recentMean;
+
+    // Use expected baseline for state-aware calculations
+    const baselineMean = expectedBaseline;
 
     // 5B. Calculate baseline standard deviation
     const baselineVariance =
@@ -624,7 +689,7 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     return "green";
   }, [
     chartData,
-    xmrData.limits,
+    effectiveLimits,
     xmrData.violations,
     submetric.trend,
     trendActive,
@@ -651,31 +716,83 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
   }, [chartData, xmrData.limits]);
 
   // Handlers
-  const handleLockLimits = (limits: XMRLimits) => {
+  const handleLockLimits = (
+    limits: XMRLimits,
+    isManuallyModified: boolean,
+    excludedIndices: number[]
+  ) => {
     setLockedLimits(limits);
     setIsLimitsLocked(true);
+
+    // If user made any changes in the dialog (data edits, exclusions, or manual limit changes),
+    // mark it as manual lock
+    if (isManuallyModified) {
+      setAutoLocked(false);
+      setHasEverBeenManuallyModified(true);
+      setManuallyExcludedIndices(excludedIndices); // Store manually excluded indices
+      setOutlierIndices([]); // Clear auto-detected outlier indices
+    } else if (hasEverBeenManuallyModified) {
+      // Even if no changes this time, preserve manual state if ever modified
+      setAutoLocked(false);
+      setManuallyExcludedIndices(excludedIndices);
+    } else if (autoLocked) {
+      // Was already auto-locked, preserve auto-lock state (user just re-opened and confirmed)
+      setAutoLocked(true);
+      setManuallyExcludedIndices([]);
+    } else {
+      // User manually opened dialog and locked (not from auto-lock) → manual lock
+      setAutoLocked(false);
+      setHasEverBeenManuallyModified(true);
+      setManuallyExcludedIndices(excludedIndices);
+    }
+
+    setAutoSuggestedLimits(null); // Clear auto-suggestions after locking
   };
 
   const handleUnlockLimits = () => {
     setIsLimitsLocked(false);
     setLockedLimits(null);
-    setAutoLocked(true); // Prevent auto-lock from re-triggering after manual unlock
+    setAutoSuggestedLimits(null);
     setOutlierIndices([]);
+    setManuallyExcludedIndices([]);
+    setAutoLocked(false); // Reset auto-locked state when unlocking
+    // Don't reset autoLockAttempted - once unlocked, chart uses default calculated limits
+    // To restore auto-lock, user must explicitly click "Reset to Auto Lock Limit"
+  };
+
+  const handleResetToAutoLock = () => {
+    // Reset to original auto-lock state
+    const result = calculateLimitsWithOutlierRemoval(rawDataPoints);
+    setLockedLimits(result.limits);
+    setIsLimitsLocked(true);
+    setAutoSuggestedLimits(result.limits);
+    setOutlierIndices(result.outlierIndices);
+    setOriginalAutoOutliers(result.outlierIndices);
+    setManuallyExcludedIndices([]);
+    setAutoLocked(true);
+    setHasEverBeenManuallyModified(false);
+    setAutoLockAttempted(true);
   };
 
   const handleApplyTrend = (gradient: number, intercept: number) => {
     setTrendGradient(gradient);
     setTrendIntercept(intercept);
     setTrendActive(true);
-    // Clear other filters
+
+    // Clear incompatible states when applying trend
     setIsLimitsLocked(false);
     setLockedLimits(null);
+    setAutoLocked(false);
+    setAutoSuggestedLimits(null);
   };
 
   const handleRemoveTrend = () => {
     setTrendActive(false);
     setTrendGradient(0);
     setTrendIntercept(0);
+
+    // Don't reset autoLockAttempted - auto-lock should only trigger on initial load
+    // or when explicitly requested via "Reset to Auto Lock Limit"
   };
 
   const handleApplySeasonality = (
@@ -687,11 +804,20 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
     setSeasonalityGrouping(grouping);
     setSeasonalFactors(factors);
     setSeasonalityActive(true);
+
+    // Clear incompatible states when applying seasonality
+    setIsLimitsLocked(false);
+    setLockedLimits(null);
+    setAutoLocked(false);
+    setAutoSuggestedLimits(null);
   };
 
   const handleRemoveSeasonality = () => {
     setSeasonalityActive(false);
     setSeasonalFactors([]);
+
+    // Don't reset autoLockAttempted - auto-lock should only trigger on initial load
+    // or when explicitly requested via "Reset to Auto Lock Limit"
   };
 
   return (
@@ -794,9 +920,7 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
                 disabled={trendActive}
                 className={`gap-2 ${
                   isLimitsLocked
-                    ? autoLocked
-                      ? "bg-green-50 text-green-600 border-green-600 hover:bg-green-100 dark:bg-green-950 dark:hover:bg-green-900"
-                      : "bg-blue-50 text-blue-600 border-blue-600 hover:bg-blue-100 dark:bg-blue-950 dark:hover:bg-blue-900"
+                    ? "bg-green-50 text-green-600 border-green-600 hover:bg-green-100 dark:bg-green-950 dark:hover:bg-green-900"
                     : ""
                 }`}
               >
@@ -947,10 +1071,16 @@ export function SubmetricLineChart({ submetric }: SubmetricLineChartProps) {
         open={isLockLimitsDialogOpen}
         onOpenChange={setIsLockLimitsDialogOpen}
         dataPoints={rawDataPoints}
-        currentLimits={xmrData.limits}
+        currentLimits={autoSuggestedLimits || xmrData.limits}
         onLockLimits={handleLockLimits}
         submetricName={submetric.label.split("-")[1].trim()}
-        outlierIndices={outlierIndices}
+        outlierIndices={
+          hasEverBeenManuallyModified ? manuallyExcludedIndices : outlierIndices
+        }
+        isCurrentLimitsManuallyLocked={hasEverBeenManuallyModified}
+        autoDetectedOutliers={originalAutoOutliers}
+        onResetToAutoLock={handleResetToAutoLock}
+        isAutoLocked={autoLocked}
       />
 
       {/* Trend Dialog */}

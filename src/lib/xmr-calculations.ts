@@ -748,7 +748,8 @@ export function removeOutliersFromData(data: DataPoint[]): {
   const madOutliers = new Set(detectOutliersMAD(values));
   const percentileOutliers = new Set(detectOutliersPercentile(values));
 
-  // Consensus: flag if detected by at least 1 method
+  // Consensus: flag if detected by at least 2 methods (more robust)
+  // This reduces false positives from single-method detection
   const candidateOutliers = new Map<number, number>();
   [iqrOutliers, zScoreOutliers, madOutliers, percentileOutliers].forEach(
     (outlierSet) => {
@@ -765,11 +766,15 @@ export function removeOutliersFromData(data: DataPoint[]): {
     values.length;
   const stdDev = Math.sqrt(variance);
 
-  // Sort candidates by severity (extreme outliers prioritized)
+  // Filter candidates: require at least 2 methods to agree, OR 1 method with very high z-score
   const sortedCandidates = Array.from(candidateOutliers.entries())
     .map(([index, methodCount]) => {
       const zScore = stdDev > 0 ? Math.abs((values[index] - mean) / stdDev) : 0;
       return { index, methodCount, zScore };
+    })
+    .filter(({ methodCount, zScore }) => {
+      // Accept if 2+ methods agree, or 1 method with extreme z-score (>3.0)
+      return methodCount >= 2 || (methodCount >= 1 && zScore > 3.0);
     })
     .sort((a, b) => {
       // First, prioritize by method count

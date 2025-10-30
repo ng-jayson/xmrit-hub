@@ -51,17 +51,19 @@ export function SubmetricTrendDialog({
     initialStats?.c.toFixed(6) || "0"
   );
 
-  // Reset all state when dialog opens
+  // Track if user has manually edited gradient/intercept
+  const [isManuallyEdited, setIsManuallyEdited] = useState(false);
+
+  // Only reset when dataPoints prop changes (new data loaded), not when dialog opens
   useEffect(() => {
-    if (open) {
-      setEditedDataPoints(dataPoints);
-      const stats = calculateRegressionStats(dataPoints);
-      if (stats) {
-        setGradient(stats.m.toFixed(8));
-        setIntercept(stats.c.toFixed(6));
-      }
+    setEditedDataPoints(dataPoints);
+    const stats = calculateRegressionStats(dataPoints);
+    if (stats) {
+      setGradient(stats.m.toFixed(8));
+      setIntercept(stats.c.toFixed(6));
     }
-  }, [open, dataPoints]);
+    setIsManuallyEdited(false);
+  }, [dataPoints]);
 
   // Reset to original data (without recalculating)
   const handleResetToOriginal = useCallback(() => {
@@ -71,6 +73,7 @@ export function SubmetricTrendDialog({
       setGradient(stats.m.toFixed(8));
       setIntercept(stats.c.toFixed(6));
     }
+    setIsManuallyEdited(false);
   }, [dataPoints]);
 
   // Handle value change in table
@@ -84,6 +87,18 @@ export function SubmetricTrendDialog({
       });
     }
   }, []);
+
+  // Auto-recalculate when edited data changes (matching main3.ts behavior)
+  // BUT only if the user hasn't manually entered gradient/intercept values
+  useEffect(() => {
+    if (!isManuallyEdited) {
+      const stats = calculateRegressionStats(editedDataPoints);
+      if (stats) {
+        setGradient(stats.m.toFixed(8));
+        setIntercept(stats.c.toFixed(6));
+      }
+    }
+  }, [editedDataPoints, isManuallyEdited]);
 
   // Handle applying trend limits (recalculate before applying)
   const handleApplyTrend = () => {
@@ -123,8 +138,10 @@ export function SubmetricTrendDialog({
             Use this to generate trended limit lines from a line of best fit.
           </p>
           <p className="text-sm text-muted-foreground">
-            Edit data points below and click "Recalculate Equation", or manually
-            enter the gradient and intercept. Manual values take precedence.
+            The gradient and intercept are automatically recalculated as you
+            edit data points. Manual changes to gradient/intercept will disable
+            auto-recalculation. Click "Reset to Original" to restore data and
+            re-enable auto-recalculation.
           </p>
 
           {/* Average line equation */}
@@ -135,7 +152,10 @@ export function SubmetricTrendDialog({
               <Input
                 type="text"
                 value={gradient}
-                onChange={(e) => setGradient(e.target.value)}
+                onChange={(e) => {
+                  setGradient(e.target.value);
+                  setIsManuallyEdited(true);
+                }}
                 className="w-32 h-9 text-sm"
                 placeholder="-34.132867"
               />
@@ -143,7 +163,10 @@ export function SubmetricTrendDialog({
               <Input
                 type="text"
                 value={intercept}
-                onChange={(e) => setIntercept(e.target.value)}
+                onChange={(e) => {
+                  setIntercept(e.target.value);
+                  setIsManuallyEdited(true);
+                }}
                 className="w-40 h-9 text-sm"
                 placeholder="940.397436"
               />
@@ -154,16 +177,14 @@ export function SubmetricTrendDialog({
           <div className="flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold text-sm">Linear Regression Data:</h3>
-              <div className="flex gap-3">
-                <Button
-                  variant="link"
-                  size="sm"
-                  onClick={handleResetToOriginal}
-                  className="h-auto p-0 text-blue-600 hover:text-blue-700"
-                >
-                  Reset to Original
-                </Button>
-              </div>
+              <Button
+                variant="link"
+                size="sm"
+                onClick={handleResetToOriginal}
+                className="h-auto p-0 text-blue-600 hover:text-blue-700"
+              >
+                Reset to Original
+              </Button>
             </div>
 
             <ScrollArea className="h-[400px] border rounded-lg">
