@@ -59,10 +59,13 @@ Get Google OAuth credentials:
 **3. Database & Run**
 
 ```bash
-npm run db:generate  # Generate migrations
-npm run db:migrate   # Apply migrations
-npm run dev          # Start server → http://localhost:3000
+npm run db:generate     # Generate migrations
+npm run db:migrate      # Apply migrations
+npm run workspace:init  # Create default workspace (required for n8n workflow)
+npm run dev             # Start server → http://localhost:3000
 ```
+
+> **Note:** The `workspace:init` command creates a default workspace and automatically updates `n8n.json` with the correct workspace ID. This is required before using the n8n workflow for data ingestion.
 
 ## 📁 Project Structure
 
@@ -88,18 +91,19 @@ src/
 
 ## 🛠️ Available Scripts
 
-| Command               | Description                             |
-| --------------------- | --------------------------------------- |
-| `npm run dev`         | Start development server with Turbopack |
-| `npm run build`       | Build for production                    |
-| `npm run start`       | Start production server                 |
-| `npm run lint`        | Run Biome linter                        |
-| `npm run format`      | Format code with Biome                  |
-| `npm run db:generate` | Generate database migrations            |
-| `npm run db:migrate`  | Apply migrations to database            |
-| `npm run db:push`     | Push schema changes to database         |
-| `npm run db:studio`   | Open Drizzle Studio (database GUI)      |
-| `npm run db:reset`    | Reset database (⚠️ destructive)         |
+| Command                  | Description                             |
+| ------------------------ | --------------------------------------- |
+| `npm run dev`            | Start development server with Turbopack |
+| `npm run build`          | Build for production                    |
+| `npm run start`          | Start production server                 |
+| `npm run lint`           | Run Biome linter                        |
+| `npm run format`         | Format code with Biome                  |
+| `npm run db:generate`    | Generate database migrations            |
+| `npm run db:migrate`     | Apply migrations to database            |
+| `npm run db:push`        | Push schema changes to database         |
+| `npm run db:studio`      | Open Drizzle Studio (database GUI)      |
+| `npm run db:reset`       | Reset database (⚠️ destructive)         |
+| `npm run workspace:init` | Create default workspace & update n8n   |
 
 ## 🔧 Data Ingestion API
 
@@ -148,10 +152,17 @@ Included `n8n.json` workflow: Extract from Metabase → Transform → Ingest int
 
 **Setup:**
 
-1. Import `n8n.json` to your n8n instance
-2. Configure Metabase auth & collection ID
-3. Set Bearer token to your `METRICS_API_KEY`
-4. Set workspace ID
+1. **Create Default Workspace** (required before importing workflow):
+
+```bash
+npm run workspace:init
+```
+
+This creates a workspace and automatically updates `n8n.json` with the correct workspace ID.
+
+2. Import `n8n.json` to your n8n instance
+3. Configure Metabase auth & collection ID
+4. Set Bearer token to your `METRICS_API_KEY`
 5. Run manually or scheduled
 
 **Features:** Auto date calculation, batch processing, retry logic, dynamic metric extraction, multi-dimension support. Adaptable to other data sources.

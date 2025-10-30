@@ -14,7 +14,8 @@
     "db:check": "drizzle-kit check",
     "db:introspect": "drizzle-kit introspect",
     "db:studio": "drizzle-kit studio",
-    "db:reset": "npx tsx scripts/reset-database.ts"
+    "db:reset": "npx tsx scripts/reset-database.ts",
+    "workspace:init": "npx tsx scripts/create-default-workspace.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.0",
