@@ -2,9 +2,8 @@
 
 import { use } from "react";
 import { useRouter } from "next/navigation";
-import { useWorkspace } from "@/lib/api";
+import { useWorkspace, useDeleteSlide } from "@/lib/api";
 import { SlideTable } from "./components/slide-table";
-import { slideApiClient } from "@/lib/api/slides";
 import * as React from "react";
 
 interface WorkspacePageProps {
@@ -17,14 +16,7 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
   const { workspaceId } = use(params);
   const router = useRouter();
   const { workspace, loading } = useWorkspace(workspaceId);
-  const [slides, setSlides] = React.useState(workspace?.slides || []);
-
-  // Update slides when workspace changes
-  React.useEffect(() => {
-    if (workspace?.slides) {
-      setSlides(workspace.slides);
-    }
-  }, [workspace?.slides]);
+  const deleteSlide = useDeleteSlide();
 
   const handleCreateSlide = React.useCallback(() => {
     // TODO: Implement slide creation
@@ -41,31 +33,30 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
     console.log("Editing slide:", slide.title);
   }, []);
 
-  const handleDeleteSlide = React.useCallback(async (slideId: string) => {
-    try {
-      // Show confirmation dialog
-      if (
-        !confirm(
-          "Are you sure you want to delete this slide? This will also delete all metrics and data points associated with it. This action cannot be undone."
-        )
-      ) {
-        return;
+  const handleDeleteSlide = React.useCallback(
+    async (slideId: string) => {
+      try {
+        // Show confirmation dialog
+        if (
+          !confirm(
+            "Are you sure you want to delete this slide? This will also delete all metrics and data points associated with it. This action cannot be undone."
+          )
+        ) {
+          return;
+        }
+
+        // Call the mutation - React Query will automatically invalidate the cache
+        // and update both the page and sidebar!
+        await deleteSlide.mutateAsync(slideId);
+
+        console.log("Slide deleted successfully:", slideId);
+      } catch (error) {
+        console.error("Error deleting slide:", error);
+        alert("Failed to delete slide. Please try again.");
       }
-
-      // Call the API to delete the slide
-      await slideApiClient.deleteSlide(slideId);
-
-      // Update the local state to remove the deleted slide
-      setSlides((prevSlides) =>
-        prevSlides.filter((slide) => slide.id !== slideId)
-      );
-
-      console.log("Slide deleted successfully:", slideId);
-    } catch (error) {
-      console.error("Error deleting slide:", error);
-      alert("Failed to delete slide. Please try again.");
-    }
-  }, []);
+    },
+    [deleteSlide]
+  );
 
   const handleViewSlide = React.useCallback(
     (slideId: string) => {
@@ -100,7 +91,7 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
   return (
     <SlideTable
       currentWorkspace={workspace}
-      slides={slides}
+      slides={workspace.slides}
       onCreateSlide={handleCreateSlide}
       onEditSlide={handleEditSlide}
       onDeleteSlide={handleDeleteSlide}

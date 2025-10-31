@@ -1,6 +1,6 @@
 // Workspace API client and hooks
 
-import * as React from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { BaseApiClient } from "./base";
 import type { Workspace, WorkspaceWithSlides } from "@/types/db/workspace";
 
@@ -46,70 +46,92 @@ export class WorkspaceApiClient extends BaseApiClient {
 // Default workspace client instance
 export const workspaceApiClient = new WorkspaceApiClient();
 
-// React hooks for workspace data fetching
+// Query keys for React Query cache management
+export const workspaceKeys = {
+  all: ["workspaces"] as const,
+  lists: () => [...workspaceKeys.all, "list"] as const,
+  list: () => [...workspaceKeys.lists()] as const,
+  details: () => [...workspaceKeys.all, "detail"] as const,
+  detail: (id: string) => [...workspaceKeys.details(), id] as const,
+};
+
+// React Query hooks for workspace data fetching
 export function useWorkspaces() {
-  const [workspaces, setWorkspaces] = React.useState<Workspace[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    workspaceApiClient
-      .getAllWorkspaces()
-      .then(setWorkspaces)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const refetch = React.useCallback(() => {
-    setLoading(true);
-    setError(null);
-    workspaceApiClient
-      .getAllWorkspaces()
-      .then(setWorkspaces)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+  const query = useQuery({
+    queryKey: workspaceKeys.list(),
+    queryFn: () => workspaceApiClient.getAllWorkspaces(),
+  });
 
   return {
-    workspaces,
-    loading,
-    error,
-    refetch,
+    workspaces: query.data || [],
+    loading: query.isLoading,
+    error: query.error?.message || null,
+    refetch: query.refetch,
   };
 }
 
 export function useWorkspace(workspaceId: string) {
-  const [workspace, setWorkspace] = React.useState<WorkspaceWithSlides | null>(
-    null
-  );
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    if (!workspaceId) return;
-
-    workspaceApiClient
-      .getWorkspaceById(workspaceId)
-      .then(setWorkspace)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [workspaceId]);
-
-  const refetch = React.useCallback(() => {
-    if (!workspaceId) return;
-    setLoading(true);
-    setError(null);
-    workspaceApiClient
-      .getWorkspaceById(workspaceId)
-      .then(setWorkspace)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [workspaceId]);
+  const query = useQuery({
+    queryKey: workspaceKeys.detail(workspaceId),
+    queryFn: () => workspaceApiClient.getWorkspaceById(workspaceId),
+    enabled: !!workspaceId,
+  });
 
   return {
-    workspace,
-    loading,
-    error,
-    refetch,
+    workspace: query.data || null,
+    loading: query.isLoading,
+    error: query.error?.message || null,
+    refetch: query.refetch,
   };
+}
+
+// Mutation hooks for workspace operations
+export function useCreateWorkspace() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: Partial<Workspace>) =>
+      workspaceApiClient.createWorkspace(data),
+    onSuccess: () => {
+      // Invalidate and refetch workspaces list
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.list() });
+    },
+  });
+}
+
+export function useUpdateWorkspace() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      data,
+    }: {
+      workspaceId: string;
+      data: Partial<Workspace>;
+    }) => workspaceApiClient.updateWorkspace(workspaceId, data),
+    onSuccess: (_, variables) => {
+      // Invalidate specific workspace and list
+      queryClient.invalidateQueries({
+        queryKey: workspaceKeys.detail(variables.workspaceId),
+      });
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.list() });
+    },
+  });
+}
+
+export function useDeleteWorkspace() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (workspaceId: string) =>
+      workspaceApiClient.deleteWorkspace(workspaceId),
+    onSuccess: (_, workspaceId) => {
+      // Remove from cache and invalidate list
+      queryClient.removeQueries({
+        queryKey: workspaceKeys.detail(workspaceId),
+      });
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.list() });
+    },
+  });
 }

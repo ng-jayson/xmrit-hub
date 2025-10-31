@@ -7,8 +7,21 @@ export { SlideApiClient, slideApiClient } from "./slides";
 export { MetricApiClient, metricApiClient } from "./metrics";
 
 // Export all hooks
-export { useWorkspaces, useWorkspace } from "./workspaces";
-export { useSlide } from "./slides";
+export {
+  useWorkspaces,
+  useWorkspace,
+  useCreateWorkspace,
+  useUpdateWorkspace,
+  useDeleteWorkspace,
+  workspaceKeys,
+} from "./workspaces";
+export {
+  useSlide,
+  useCreateSlide,
+  useUpdateSlide,
+  useDeleteSlide,
+  slideKeys,
+} from "./slides";
 export { useMetric } from "./metrics";
 
 // Export types

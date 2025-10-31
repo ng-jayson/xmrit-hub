@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { getAuthSession } from "@/lib/auth";
 import { AuthSessionProvider } from "@/providers/session-provider";
 import { ThemeProvider } from "@/providers/theme-provider";
+import { QueryProvider } from "@/providers/query-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -17,7 +18,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "XMRIT",
-  description: "Statistical Process Control and XMR Chart Analysis",
+  description: "WBR charts",
 };
 
 export default async function RootLayout({
@@ -39,7 +40,7 @@ export default async function RootLayout({
           disableTransitionOnChange
         >
           <AuthSessionProvider session={session}>
-            {children}
+            <QueryProvider>{children}</QueryProvider>
           </AuthSessionProvider>
         </ThemeProvider>
       </body>
