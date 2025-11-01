@@ -1,5 +1,9 @@
 # Xmrit - Statistical Process Control Dashboard
 
+<p align="center">
+  <img src="./public/dashboard-preview.png" alt="XMR Dashboard Preview" width="800"/>
+</p>
+
 Inspired by [xmrit.com](https://xmrit.com) by Commoncog, this is a self-hosted dashboard platform for Statistical Process Control (SPC) using XMR (X-bar and Moving Range) charts. Deploy your own instance to monitor metrics, detect process variations, and make data-driven decisions across your organization.
 
 > **New to XMR Charts?** See the [XMRit User Manual](https://xmrit.com/manual/) by Commoncog for concepts, detection rules, trend analysis, and best practices.
